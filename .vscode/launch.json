@@ -194,17 +194,20 @@
                 "--output_dir",
                 "./SOIBench/eval_results",
                 "--models",
-                "local_debug",
-                "api_debug",
-                "--datasets",
-                "lasot",
+                "local_qwen3-vl-4b-instruct",
+                "local_qwen3-vl-8b-instruct",
+                "api_qwen3-vl-235b-a22b-instruct",
                 "--lasot_gt_root",
-                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot"
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot",
+                "--mgit_gt_root",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit",
+                "--tnl2k_gt_root",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k"
             ],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             },
-            "justMyCode": false
+            "justMyCode": true
         },
         {
             "name": "SOIBench: 可视化结果",
@@ -225,6 +228,63 @@
                 "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
                 "--output_dir",
                 "./SOIBench/vis_results",
+                "--save_video",
+                "--fps",
+                "30"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "SOIBench: 评测结果 (含人类基线)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/SOIBench/vlms/eval_results.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--pred_root",
+                "./SOIBench/results",
+                "--output_dir",
+                "./SOIBench/eval_results",
+                "--models",
+                "local_qwen3-vl-4b-instruct",
+                "local_qwen3-vl-8b-instruct",
+                "api_qwen3-vl-235b-a22b-instruct",
+                "--lasot_gt_root",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot",
+                "--mgit_gt_root",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit",
+                "--tnl2k_gt_root",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k",
+                "--add_human_baseline"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": true
+        },
+        {
+            "name": "SOIBench: 可视化结果 (含人类基线)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/SOIBench/vlms/visualize_grounding.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset",
+                "lasot",
+                "--seq_name",
+                "airplane-1",
+                "--pred_file",
+                "./SOIBench/results/lasot/local_debug/airplane-1_pred.jsonl",
+                "--gt_file",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot/airplane-1_descriptions.jsonl",
+                "--image_root",
+                "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
+                "--output_dir",
+                "./SOIBench/vis_results",
+                "--show_human_baseline",
                 "--save_video",
                 "--fps",
                 "30"

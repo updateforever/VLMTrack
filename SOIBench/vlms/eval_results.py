@@ -6,7 +6,7 @@ SOIBench/vlms/eval_results.py
 1）加载 GT 和 Pred JSONL
 2）计算 IoU 指标
 3）绘制 Success Plot
-4）生成评测报告
+4）生成评测报告（整体 + 各子数据集）
 """
 
 import argparse
@@ -52,12 +52,13 @@ def calculate_iou(box1, box2):
     return inter_area / union if union > 0 else 0.0
 
 
-def load_seq_data(jsonl_path, is_gt=False):
+def load_seq_data(jsonl_path, is_gt=False, load_human_baseline=False):
     """
     加载单个序列文件，返回 {frame_idx: box} 字典
     参数:
         jsonl_path: JSONL 文件路径
         is_gt: 是否为 GT 文件
+        load_human_baseline: 是否加载人类基线 (从 GT 文件的 pred_boxes 字段)
     返回:
         {frame_idx: box} 字典
     """
@@ -65,6 +66,8 @@ def load_seq_data(jsonl_path, is_gt=False):
     if not os.path.exists(jsonl_path):
         return data_map
 
+    last_valid_box = None  # 用于 skip 帧的填充
+    
     with open(jsonl_path, 'r', encoding='utf-8') as f:
         for line in f:
             if not line.strip():
@@ -72,30 +75,52 @@ def load_seq_data(jsonl_path, is_gt=False):
             try:
                 item = json.loads(line)
                 
-                # 跳过 skip 的帧 (仅针对 GT)
-                if is_gt and item.get("status") == "skip":
-                    continue
-                
                 fid = int(item.get("frame_idx", -1))
                 if fid == -1:
                     continue
+                
+                is_skip = item.get("status") == "skip"
 
-                if is_gt:
+                if load_human_baseline:
+                    # 加载人类基线: 从 pred_boxes 提取
+                    pred_boxes = item.get("pred_boxes", [])
+                    
+                    if is_skip:
+                        # skip 帧: 使用上一个有效帧的结果
+                        if last_valid_box is not None:
+                            data_map[fid] = last_valid_box
+                    else:
+                        # 非 skip 帧: 提取 pred_boxes
+                        if pred_boxes and len(pred_boxes) > 0:
+                            # pred_boxes 格式: [[x1,y1], [x2,y2]] -> [x1,y1,x2,y2]
+                            box = pred_boxes[0]
+                            if len(box) == 2 and len(box[0]) == 2:
+                                box = [box[0][0], box[0][1], box[1][0], box[1][1]]
+                            last_valid_box = box
+                            data_map[fid] = box
+                        
+                elif is_gt:
                     # GT 提取逻辑
-                    box = item.get("gt_box") or item.get("bbox")
+                    if not is_skip:
+                        box = item.get("gt_box") or item.get("bbox")
+                        # gt_box 格式: [[x1,y1], [x2,y2]] -> [x1,y1,x2,y2]
+                        if box and len(box) == 2 and len(box[0]) == 2:
+                            box = [box[0][0], box[0][1], box[1][0], box[1][1]]
+                        if box:
+                            data_map[fid] = box
                 else:
                     # Pred 提取逻辑: 取第一个预测框
                     p_boxes = item.get("parsed_bboxes") or item.get("parsed_bbox")
                     box = p_boxes[0] if (p_boxes and len(p_boxes) > 0) else None
-                
-                if box:
-                    data_map[fid] = box
+                    if box:
+                        data_map[fid] = box
+                        
             except:
                 continue
     return data_map
 
 
-def evaluate_dataset(ds_name, gt_root, pred_root, model_tags):
+def evaluate_dataset(ds_name, gt_root, pred_root, model_tags, add_human_baseline=False):
     """
     评测单个数据集
     参数:
@@ -103,6 +128,7 @@ def evaluate_dataset(ds_name, gt_root, pred_root, model_tags):
         gt_root: GT JSONL 文件根目录
         pred_root: 预测结果根目录
         model_tags: 模型标签列表
+        add_human_baseline: 是否添加人类基线
     返回:
         {model_name: [all_ious_list]} 字典
     """
@@ -113,7 +139,8 @@ def evaluate_dataset(ds_name, gt_root, pred_root, model_tags):
         return {}
 
     # 存储每个模型在该数据集下的所有帧 IoU
-    model_ious = {tag: [] for tag in model_tags}
+    all_tags = model_tags + (["Human_Baseline"] if add_human_baseline else [])
+    model_ious = {tag: [] for tag in all_tags}
     
     print(f"🔄 正在评测 {ds_name} ({len(gt_files)} 个序列)...")
 
@@ -124,6 +151,11 @@ def evaluate_dataset(ds_name, gt_root, pred_root, model_tags):
         gt_map = load_seq_data(gt_path, is_gt=True)
         if not gt_map:
             continue
+        
+        # 加载人类基线 (如果需要)
+        human_map = {}
+        if add_human_baseline:
+            human_map = load_seq_data(gt_path, is_gt=False, load_human_baseline=True)
 
         # 遍历每个模型
         for tag in model_tags:
@@ -150,6 +182,13 @@ def evaluate_dataset(ds_name, gt_root, pred_root, model_tags):
                 pred_box = pred_map.get(fid)
                 iou = calculate_iou(pred_box, gt_box)
                 model_ious[tag].append(iou)
+        
+        # 计算人类基线 IoU
+        if add_human_baseline:
+            for fid, gt_box in gt_map.items():
+                human_box = human_map.get(fid)
+                iou = calculate_iou(human_box, gt_box)
+                model_ious["Human_Baseline"].append(iou)
                 
     return model_ious
 
@@ -222,6 +261,10 @@ def main():
     parser.add_argument("--tnl2k_gt_root", type=str, 
                         default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k",
                         help="TNL2K GT JSONL 根目录")
+    
+    # 人类基线
+    parser.add_argument("--add_human_baseline", action="store_true",
+                        help="是否添加人类基线对比 (从 GT JSONL 的 pred_boxes 字段提取)")
 
     args = parser.parse_args()
     
@@ -234,13 +277,14 @@ def main():
         "tnl2k": args.tnl2k_gt_root
     }
     
-    # 创建总表
-    summary_table = PrettyTable()
-    summary_table.field_names = ["Dataset", "Model", "AUC", "OP@0.50", "OP@0.75"]
-    
     print("\n" + "="*60)
     print("SOIBench Grounding 评测")
     print("="*60)
+    
+    # 收集所有数据集的结果
+    all_models = args.models + (["Human_Baseline"] if args.add_human_baseline else [])
+    all_dataset_results = {model: [] for model in all_models}  # {model: [所有数据集的 IoU 合并]}
+    per_dataset_results = {}  # {dataset: {model: [IoU]}}
     
     for ds_name in args.datasets:
         gt_root = gt_roots.get(ds_name)
@@ -250,19 +294,40 @@ def main():
             continue
         
         # 计算该数据集下所有模型的 IoU
-        dataset_results = evaluate_dataset(ds_name, gt_root, args.pred_root, args.models)
+        dataset_results = evaluate_dataset(ds_name, gt_root, args.pred_root, args.models, args.add_human_baseline)
         
         if not dataset_results:
             continue
         
-        # 绘制 Success Plot
-        plot_success_curves(dataset_results, args.output_dir, ds_name)
+        # 保存该数据集的结果
+        per_dataset_results[ds_name] = dataset_results
         
-        # 计算标量指标并填表
+        # 合并到总结果中
+        for model in all_models:
+            all_dataset_results[model].extend(dataset_results[model])
+        
+        # 绘制该数据集的 Success Plot
+        plot_success_curves(dataset_results, args.output_dir, ds_name)
+    
+    # 绘制整体 SOIBench Success Plot
+    if any(all_dataset_results.values()):
+        plot_success_curves(all_dataset_results, args.output_dir, "SOIBench_Overall")
+    
+    # 生成报告表格
+    print("\n" + "="*60)
+    print("评测结果汇总")
+    print("="*60)
+    
+    # 1. 整体 SOIBench 指标
+    if any(all_dataset_results.values()):
+        print("\n【整体 SOIBench 指标】")
+        overall_table = PrettyTable()
+        overall_table.field_names = ["Model", "AUC", "OP@0.50", "OP@0.75", "Total Frames"]
+        
         for model in args.models:
-            ious = np.array(dataset_results[model])
+            ious = np.array(all_dataset_results[model])
             if len(ious) == 0:
-                summary_table.add_row([ds_name, model, 0.0, 0.0, 0.0])
+                overall_table.add_row([model, 0.0, 0.0, 0.0, 0])
                 continue
                 
             # AUC: 0-1 阈值下的平均成功率
@@ -276,19 +341,60 @@ def main():
             # OP@0.75: IoU >= 0.75 的比例
             op75 = np.mean(ious >= 0.75)
             
-            summary_table.add_row([ds_name, model, f"{auc:.3f}", f"{op50:.3f}", f"{op75:.3f}"])
-            
-        summary_table.add_row(["---", "---", "---", "---", "---"])
-
-    print("\n" + "="*60)
-    print("评测结果汇总")
-    print("="*60)
-    print(summary_table)
+            overall_table.add_row([model, f"{auc:.3f}", f"{op50:.3f}", f"{op75:.3f}", len(ious)])
+        
+        print(overall_table)
     
-    # 保存表格
+    # 2. 各子数据集指标
+    if per_dataset_results:
+        print("\n【各子数据集指标】")
+        detail_table = PrettyTable()
+        detail_table.field_names = ["Dataset", "Model", "AUC", "OP@0.50", "OP@0.75", "Frames"]
+        
+        for ds_name in args.datasets:
+            if ds_name not in per_dataset_results:
+                continue
+                
+            dataset_results = per_dataset_results[ds_name]
+            
+            for model in args.models:
+                ious = np.array(dataset_results[model])
+                if len(ious) == 0:
+                    detail_table.add_row([ds_name, model, 0.0, 0.0, 0.0, 0])
+                    continue
+                    
+                # AUC: 0-1 阈值下的平均成功率
+                thresholds = np.linspace(0, 1, 21)
+                curve = [np.mean(ious >= thr) for thr in thresholds]
+                auc = np.mean(curve)
+                
+                # OP@0.5: IoU >= 0.5 的比例
+                op50 = np.mean(ious >= 0.50)
+                
+                # OP@0.75: IoU >= 0.75 的比例
+                op75 = np.mean(ious >= 0.75)
+                
+                detail_table.add_row([ds_name, model, f"{auc:.3f}", f"{op50:.3f}", f"{op75:.3f}", len(ious)])
+            
+            detail_table.add_row(["---", "---", "---", "---", "---", "---"])
+        
+        print(detail_table)
+    
+    # 保存报告
     report_path = os.path.join(args.output_dir, "report.txt")
     with open(report_path, "w", encoding="utf-8") as f:
-        f.write(str(summary_table))
+        f.write("="*60 + "\n")
+        f.write("SOIBench Grounding 评测报告\n")
+        f.write("="*60 + "\n\n")
+        
+        if any(all_dataset_results.values()):
+            f.write("【整体 SOIBench 指标】\n")
+            f.write(str(overall_table) + "\n\n")
+        
+        if per_dataset_results:
+            f.write("【各子数据集指标】\n")
+            f.write(str(detail_table) + "\n")
+    
     print(f"\n📊 报告已保存: {report_path}")
 
 

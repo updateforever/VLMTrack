@@ -4,7 +4,7 @@ SOIBench/vlms/visualize_grounding.py
 可视化 Grounding 结果
 功能：
 1）读取 Pred JSONL 和 GT JSONL
-2）在原图上画 GT (绿色) 和 Pred (红色)
+2）在原图上画 GT (绿色)、Pred (红色)、人类基线 (蓝色)
 3）保存为图片或视频
 """
 
@@ -17,12 +17,13 @@ from tqdm import tqdm
 from PIL import Image, ImageDraw, ImageFont
 
 
-def load_seq_data(jsonl_path, is_gt=False):
+def load_seq_data(jsonl_path, is_gt=False, load_human_baseline=False):
     """
     加载单个序列文件，返回 {frame_idx: (box, image_path)} 字典
     参数:
         jsonl_path: JSONL 文件路径
         is_gt: 是否为 GT 文件
+        load_human_baseline: 是否加载人类基线
     返回:
         {frame_idx: (box, image_path)} 字典
     """
@@ -30,31 +31,56 @@ def load_seq_data(jsonl_path, is_gt=False):
     if not os.path.exists(jsonl_path):
         return data_map
 
+    last_valid_box = None  # 用于 skip 帧的填充
+    
     with open(jsonl_path, 'r', encoding='utf-8') as f:
         for line in f:
             if not line.strip():
                 continue
             try:
                 item = json.loads(line)
-                if is_gt and item.get("status") == "skip":
-                    continue
                 
                 fid = int(item.get("frame_idx", -1))
                 if fid == -1:
                     continue
+                
+                is_skip = item.get("status") == "skip"
+                img_path = item.get("image_path", "")
 
-                # 提取 bbox
-                if is_gt:
-                    box = item.get("gt_box") or item.get("bbox")
+                if load_human_baseline:
+                    # 加载人类基线: 从 pred_boxes 提取
+                    pred_boxes = item.get("pred_boxes", [])
+                    
+                    if is_skip:
+                        # skip 帧: 使用上一个有效帧的结果
+                        if last_valid_box is not None:
+                            data_map[fid] = (last_valid_box, img_path)
+                    else:
+                        # 非 skip 帧: 提取 pred_boxes
+                        if pred_boxes and len(pred_boxes) > 0:
+                            # pred_boxes 格式: [[x1,y1], [x2,y2]] -> [x1,y1,x2,y2]
+                            box = pred_boxes[0]
+                            if len(box) == 2 and len(box[0]) == 2:
+                                box = [box[0][0], box[0][1], box[1][0], box[1][1]]
+                            last_valid_box = box
+                            data_map[fid] = (box, img_path)
+                
+                elif is_gt:
+                    # GT 提取逻辑
+                    if not is_skip:
+                        box = item.get("gt_box") or item.get("bbox")
+                        # gt_box 格式: [[x1,y1], [x2,y2]] -> [x1,y1,x2,y2]
+                        if box and len(box) == 2 and len(box[0]) == 2:
+                            box = [box[0][0], box[0][1], box[1][0], box[1][1]]
+                        if box:
+                            data_map[fid] = (box, img_path)
                 else:
+                    # Pred 提取逻辑: 取第一个预测框
                     p_boxes = item.get("parsed_bboxes") or item.get("parsed_bbox")
                     box = p_boxes[0] if (p_boxes and len(p_boxes) > 0) else None
-                
-                # 提取图像路径
-                img_path = item.get("image_path", "")
-                
-                if box:
-                    data_map[fid] = (box, img_path)
+                    if box:
+                        data_map[fid] = (box, img_path)
+                        
             except:
                 continue
     return data_map
@@ -145,6 +171,8 @@ def main():
                         help="是否保存为视频")
     parser.add_argument("--fps", type=int, default=30,
                         help="视频帧率")
+    parser.add_argument("--show_human_baseline", action="store_true",
+                        help="是否显示人类基线 (从 GT JSONL 的 pred_boxes 提取)")
     
     args = parser.parse_args()
     
@@ -156,8 +184,14 @@ def main():
     pred_map = load_seq_data(args.pred_file, is_gt=False)
     gt_map = load_seq_data(args.gt_file, is_gt=True)
     
+    # 加载人类基线 (如果需要)
+    human_map = {}
+    if args.show_human_baseline:
+        human_map = load_seq_data(args.gt_file, is_gt=False, load_human_baseline=True)
+        print(f"📊 人类基线: {len(human_map)} 帧")
+    
     # 获取所有帧索引
-    all_fids = sorted(list(set(pred_map.keys()) | set(gt_map.keys())))
+    all_fids = sorted(list(set(pred_map.keys()) | set(gt_map.keys()) | set(human_map.keys())))
     
     if not all_fids:
         print("❌ 没有找到任何帧数据")
@@ -178,6 +212,8 @@ def main():
             _, img_path = gt_map[fid]
         elif fid in pred_map:
             _, img_path = pred_map[fid]
+        elif fid in human_map:
+            _, img_path = human_map[fid]
         
         # 修复图像路径
         if img_path:
@@ -193,6 +229,11 @@ def main():
         if fid in gt_map:
             gt_box, _ = gt_map[fid]
             img = draw_box(img, gt_box, "green", "GT")
+        
+        # 画人类基线 (蓝色)
+        if args.show_human_baseline and fid in human_map:
+            human_box, _ = human_map[fid]
+            img = draw_box(img, human_box, "blue", "Human")
             
         # 画 Pred (红色)
         if fid in pred_map:
