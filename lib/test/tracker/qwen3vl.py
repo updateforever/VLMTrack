@@ -11,6 +11,7 @@ Qwen3VL Tracker: VLM-based tracker using Qwen3-VL
 - 动态更新模板 (当前帧 + 预测框)
 """
 from lib.test.tracker.basetracker import BaseTracker
+from lib.test.evaluation.environment import env_settings
 import torch
 import cv2
 import numpy as np
@@ -19,7 +20,8 @@ import json
 import os
 import time
 import base64
-import tempfile
+import io
+from PIL import Image
 from typing import List, Optional, Tuple
 
 
@@ -135,10 +137,24 @@ def xywh_to_xyxy(bbox_xywh: List[float]) -> List[float]:
     return [x, y, x + w, y + h]
 
 
+def numpy_to_base64(image: np.ndarray) -> str:
+    """将numpy图像转换为base64字符串 (不存本地文件)"""
+    # RGB to BGR
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    else:
+        image_bgr = image
+    
+    # 编码为JPEG
+    _, buffer = cv2.imencode('.jpg', image_bgr)
+    b64 = base64.b64encode(buffer).decode('utf-8')
+    return b64
+
+
 # ============== API Inference ==============
 
 def qwen3vl_api_chat(
-    image_paths: List[str],
+    images_b64: List[str],
     prompt: str,
     model_name: str,
     base_url: str,
@@ -148,14 +164,12 @@ def qwen3vl_api_chat(
     retries: int = 3,
 ) -> str:
     """
-    OpenAI 兼容 API 推理 (支持多图)
+    OpenAI 兼容 API 推理 (使用base64图像,不存文件)
     """
     from openai import OpenAI
     
     content = []
-    for img_path in image_paths:
-        with open(img_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
+    for b64 in images_b64:
         content.append({
             "type": "image_url", 
             "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
@@ -189,14 +203,14 @@ class QWEN3VL(BaseTracker):
     VLM-based tracker using Qwen3-VL
     
     模式:
-    - mode='local': 本地推理 (需要GPU显存)
-    - mode='api': API推理 (支持多线程,无显存需求)
+    - mode='local': 本地推理
+    - mode='api': API推理 (支持多线程)
     
     debug:
     - 0: 无输出
     - 1: 打印关键信息
-    - 2: 保存可视化图片
-    - 3: 实时显示窗口
+    - 2: 保存可视化图片到results目录
+    - 3: 保存图片 + 实时显示窗口
     """
     
     def __init__(self, params, dataset_name):
@@ -205,7 +219,7 @@ class QWEN3VL(BaseTracker):
         self.dataset_name = dataset_name
         
         # 推理模式
-        self.mode = getattr(params, 'mode', 'local')  # 'local' or 'api'
+        self.mode = getattr(params, 'mode', 'local')
         
         # 加载模型/配置API
         if self.mode == 'local':
@@ -221,14 +235,9 @@ class QWEN3VL(BaseTracker):
         self.frame_id = 0
         self.seq_name = None
         
-        # Temp files
-        self.temp_dir = tempfile.mkdtemp()
-        
-        # Debug
+        # Debug & Visualization
         self.debug = getattr(params, 'debug', 0)
-        self.vis_dir = os.path.join(self.temp_dir, "vis")
-        if self.debug >= 2:
-            os.makedirs(self.vis_dir, exist_ok=True)
+        self.vis_dir = None  # 在initialize时根据results路径设置
     
     def _load_local_model(self):
         """加载本地模型"""
@@ -240,7 +249,6 @@ class QWEN3VL(BaseTracker):
         actual_path = model_path or model_name
         print(f"[Qwen3VL] Loading local model: {actual_path}")
         
-        # 选择模型类
         if 'qwen3' in actual_path.lower():
             from transformers import Qwen3VLForConditionalGeneration
             model_class = Qwen3VLForConditionalGeneration
@@ -250,17 +258,12 @@ class QWEN3VL(BaseTracker):
         
         try:
             self.model = model_class.from_pretrained(
-                actual_path,
-                torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
-                device_map="auto"
+                actual_path, torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2", device_map="auto"
             )
         except Exception:
-            print("[Qwen3VL] Flash attention unavailable, using default")
             self.model = model_class.from_pretrained(
-                actual_path,
-                torch_dtype=torch.bfloat16,
-                device_map="auto"
+                actual_path, torch_dtype=torch.bfloat16, device_map="auto"
             )
         
         self.model.eval()
@@ -274,19 +277,7 @@ class QWEN3VL(BaseTracker):
                                      'https://dashscope.aliyuncs.com/compatible-mode/v1')
         self.api_key = getattr(self.params, 'api_key', os.environ.get('DASHSCOPE_API_KEY', ''))
         
-        print(f"[Qwen3VL] API mode: model={self.api_model}")
-        
-        if not self.api_key:
-            print("[Qwen3VL] Warning: API key not set! Set DASHSCOPE_API_KEY env or params.api_key")
-    
-    def _save_image(self, image: np.ndarray, name: str) -> str:
-        """保存图像到临时文件"""
-        path = os.path.join(self.temp_dir, f"{name}.jpg")
-        if len(image.shape) == 3 and image.shape[2] == 3:
-            cv2.imwrite(path, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-        else:
-            cv2.imwrite(path, image)
-        return path
+        print(f"[Qwen3VL] API mode: {self.api_model}")
     
     def _draw_bbox_on_image(self, image: np.ndarray, bbox_xywh: List[float], 
                             color=(0, 255, 0), thickness=3) -> np.ndarray:
@@ -297,7 +288,7 @@ class QWEN3VL(BaseTracker):
         return img
     
     def _build_tracking_prompt(self, description: str) -> str:
-        """构建跟踪prompt (不包含坐标,框画在图上)"""
+        """构建跟踪prompt"""
         return (
             f"The first image shows the template with the target object marked by a green bounding box. "
             f"The target is: {description}. "
@@ -305,27 +296,34 @@ class QWEN3VL(BaseTracker):
             f"Locate the same target in the second image, output its bbox coordinates using JSON format."
         )
     
-    def _run_inference(self, template_path: str, search_path: str, prompt: str) -> str:
-        """运行推理 (自动选择local/api)"""
+    def _run_inference(self, template_img: np.ndarray, search_img: np.ndarray, prompt: str) -> str:
+        """运行推理 (图像在内存中,不存文件)"""
         if self.mode == 'api':
+            # API模式: 转base64
+            template_b64 = numpy_to_base64(template_img)
+            search_b64 = numpy_to_base64(search_img)
             return qwen3vl_api_chat(
-                image_paths=[template_path, search_path],
+                images_b64=[template_b64, search_b64],
                 prompt=prompt,
                 model_name=self.api_model,
                 base_url=self.api_base_url,
                 api_key=self.api_key,
             )
         else:
-            return self._run_local_inference(template_path, search_path, prompt)
+            return self._run_local_inference(template_img, search_img, prompt)
     
-    def _run_local_inference(self, template_path: str, search_path: str, prompt: str) -> str:
-        """本地推理"""
+    def _run_local_inference(self, template_img: np.ndarray, search_img: np.ndarray, prompt: str) -> str:
+        """本地推理 (使用PIL Image,不存文件)"""
+        # numpy RGB to PIL
+        template_pil = Image.fromarray(template_img)
+        search_pil = Image.fromarray(search_img)
+        
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "image", "image": template_path},
-                    {"type": "image", "image": search_path},
+                    {"type": "image", "image": template_pil},
+                    {"type": "image", "image": search_pil},
                     {"type": "text", "text": prompt}
                 ]
             }
@@ -353,8 +351,8 @@ class QWEN3VL(BaseTracker):
                            search_img: np.ndarray, 
                            pred_bbox_xywh: List[float],
                            frame_id: int):
-        """保存可视化"""
-        if self.debug < 2:
+        """保存可视化到results目录"""
+        if self.debug < 2 or self.vis_dir is None:
             return
         
         result_img = self._draw_bbox_on_image(search_img, pred_bbox_xywh, 
@@ -395,6 +393,12 @@ class QWEN3VL(BaseTracker):
         if not self.language_description:
             self.language_description = "the target object marked in green box"
         
+        # 设置可视化目录 (与results路径一致)
+        if self.debug >= 2:
+            env = env_settings()
+            self.vis_dir = os.path.join(env.results_path, 'qwen3vl', 'vis', self.seq_name or 'unknown')
+            os.makedirs(self.vis_dir, exist_ok=True)
+        
         if self.debug >= 1:
             print(f"[Qwen3VL] Initialize: bbox={self.state}, mode={self.mode}")
     
@@ -404,31 +408,26 @@ class QWEN3VL(BaseTracker):
         H, W = image.shape[:2]
         
         try:
-            # 1. 模板画框
+            # 1. 模板画框 (在内存中)
             template_with_bbox = self._draw_bbox_on_image(
                 self.template_image, self.template_bbox, color=(0, 255, 0), thickness=3
             )
             
-            # 2. 保存图像
-            template_path = self._save_image(template_with_bbox, f"template_{self.frame_id}")
-            search_path = self._save_image(image, f"search_{self.frame_id}")
-            
-            # 3. 构建prompt
+            # 2. 构建prompt
             prompt = self._build_tracking_prompt(self.language_description)
             
-            # 4. 推理
-            output_text = self._run_inference(template_path, search_path, prompt)
+            # 3. 推理 (图像在内存中,不存文件)
+            output_text = self._run_inference(template_with_bbox, image, prompt)
             
             if self.debug >= 1:
                 print(f"[Qwen3VL] Frame {self.frame_id}: {output_text[:100]}...")
             
-            # 5. 解析bbox
+            # 4. 解析bbox
             bbox_xyxy = extract_bbox_from_model_output(output_text, W, H)
             
             if bbox_xyxy is not None:
                 pred_bbox = xyxy_to_xywh(bbox_xyxy)
                 self.state = pred_bbox
-                conf_score = 0.9
                 
                 self._save_visualization(template_with_bbox, image, pred_bbox, self.frame_id)
                 
@@ -436,15 +435,16 @@ class QWEN3VL(BaseTracker):
                 self.template_image = image.copy()
                 self.template_bbox = pred_bbox
             else:
+                # 解析失败,返回[0,0,0,0]
                 if self.debug >= 1:
-                    print(f"[Qwen3VL] Frame {self.frame_id}: Failed to parse bbox")
-                conf_score = 0.1
+                    print(f"[Qwen3VL] Frame {self.frame_id}: Failed to parse bbox, return [0,0,0,0]")
+                self.state = [0, 0, 0, 0]
                 
         except Exception as e:
             print(f"[Qwen3VL] Error frame {self.frame_id}: {e}")
-            conf_score = 0.0
+            self.state = [0, 0, 0, 0]
         
-        return {"target_bbox": self.state, "best_score": conf_score}
+        return {"target_bbox": self.state}
 
 
 def get_tracker_class():
