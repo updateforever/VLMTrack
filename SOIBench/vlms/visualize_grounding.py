@@ -3,8 +3,8 @@
 SOIBench/vlms/visualize_grounding.py
 可视化 Grounding 结果
 功能：
-1）读取 Pred JSONL 和 GT JSONL
-2）在原图上画 GT (绿色)、Pred (红色)、人类基线 (蓝色)
+1）读取多个模型的 Pred JSONL 和 GT JSONL
+2）在原图上画 GT (绿色)、多个模型预测 (不同颜色)、人类基线 (蓝色)
 3）保存为图片或视频
 """
 
@@ -15,6 +15,13 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 from PIL import Image, ImageDraw, ImageFont
+
+
+# 为不同模型分配颜色
+MODEL_COLORS = [
+    "red", "orange", "purple", "magenta", "cyan", 
+    "yellow", "pink", "brown", "gray", "olive"
+]
 
 
 def load_seq_data(jsonl_path, is_gt=False, load_human_baseline=False):
@@ -159,8 +166,10 @@ def main():
                         help="数据集名称")
     parser.add_argument("--seq_name", type=str, required=True,
                         help="序列名称")
-    parser.add_argument("--pred_file", type=str, required=True,
-                        help="预测结果 JSONL 文件路径")
+    parser.add_argument("--pred_root", type=str, required=True,
+                        help="预测结果根目录")
+    parser.add_argument("--models", nargs='+', required=True,
+                        help="要可视化的模型 tag 列表，例如: model1 model2")
     parser.add_argument("--gt_file", type=str, required=True,
                         help="GT JSONL 文件路径")
     parser.add_argument("--image_root", type=str, required=True,
@@ -179,9 +188,9 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     print(f"\n📂 可视化序列: {args.seq_name}")
+    print(f"📊 模型数量: {len(args.models)}")
     
-    # 加载数据
-    pred_map = load_seq_data(args.pred_file, is_gt=False)
+    # 加载 GT 数据
     gt_map = load_seq_data(args.gt_file, is_gt=True)
     
     # 加载人类基线 (如果需要)
@@ -190,8 +199,33 @@ def main():
         human_map = load_seq_data(args.gt_file, is_gt=False, load_human_baseline=True)
         print(f"📊 人类基线: {len(human_map)} 帧")
     
+    # 加载所有模型的预测结果
+    model_maps = {}
+    for model_tag in args.models:
+        # 尝试多种预测文件路径结构
+        possible_paths = [
+            os.path.join(args.pred_root, args.dataset, model_tag, f"{args.seq_name}_pred.jsonl"),
+            os.path.join(args.pred_root, args.dataset, f"{args.seq_name}_{model_tag}_pred.jsonl")
+        ]
+        
+        pred_file = None
+        for p in possible_paths:
+            if os.path.exists(p):
+                pred_file = p
+                break
+        
+        if pred_file:
+            model_maps[model_tag] = load_seq_data(pred_file, is_gt=False)
+            print(f"✅ 加载模型 {model_tag}: {len(model_maps[model_tag])} 帧")
+        else:
+            print(f"⚠️  未找到模型 {model_tag} 的预测文件")
+            model_maps[model_tag] = {}
+    
     # 获取所有帧索引
-    all_fids = sorted(list(set(pred_map.keys()) | set(gt_map.keys()) | set(human_map.keys())))
+    all_fids = set(gt_map.keys()) | set(human_map.keys())
+    for model_map in model_maps.values():
+        all_fids |= set(model_map.keys())
+    all_fids = sorted(list(all_fids))
     
     if not all_fids:
         print("❌ 没有找到任何帧数据")
@@ -202,7 +236,7 @@ def main():
     # 准备视频写入器
     video_writer = None
     if args.save_video:
-        video_path = os.path.join(args.output_dir, f"{args.seq_name}.mp4")
+        video_path = os.path.join(args.output_dir, f"{args.seq_name}_compare.mp4")
 
     # 处理每一帧
     for fid in tqdm(all_fids, desc="可视化"):
@@ -210,10 +244,13 @@ def main():
         img_path = None
         if fid in gt_map:
             _, img_path = gt_map[fid]
-        elif fid in pred_map:
-            _, img_path = pred_map[fid]
         elif fid in human_map:
             _, img_path = human_map[fid]
+        else:
+            for model_map in model_maps.values():
+                if fid in model_map:
+                    _, img_path = model_map[fid]
+                    break
         
         # 修复图像路径
         if img_path:
@@ -234,11 +271,13 @@ def main():
         if args.show_human_baseline and fid in human_map:
             human_box, _ = human_map[fid]
             img = draw_box(img, human_box, "blue", "Human")
-            
-        # 画 Pred (红色)
-        if fid in pred_map:
-            pred_box, _ = pred_map[fid]
-            img = draw_box(img, pred_box, "red", "Pred")
+        
+        # 画所有模型的预测 (不同颜色)
+        for idx, (model_tag, model_map) in enumerate(model_maps.items()):
+            if fid in model_map:
+                pred_box, _ = model_map[fid]
+                color = MODEL_COLORS[idx % len(MODEL_COLORS)]
+                img = draw_box(img, pred_box, color, model_tag)
             
         # 保存图片
         if not args.save_video:

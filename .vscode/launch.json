@@ -220,17 +220,17 @@
                 "lasot",
                 "--seq_name",
                 "airplane-1",
-                "--pred_file",
-                "./SOIBench/results/lasot/local_debug/airplane-1_pred.jsonl",
+                "--pred_root",
+                "./SOIBench/results",
+                "--models",
+                "local_qwen3-vl-4b-instruct",
+                "local_qwen3-vl-8b-instruct",
                 "--gt_file",
                 "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot/airplane-1_descriptions.jsonl",
                 "--image_root",
                 "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
                 "--output_dir",
-                "./SOIBench/vis_results",
-                "--save_video",
-                "--fps",
-                "30"
+                "./SOIBench/vis_results"
             ],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
@@ -276,18 +276,19 @@
                 "lasot",
                 "--seq_name",
                 "airplane-1",
-                "--pred_file",
-                "./SOIBench/results/lasot/local_debug/airplane-1_pred.jsonl",
+                "--pred_root",
+                "./SOIBench/results",
+                "--models",
+                "local_qwen3-vl-4b-instruct",
+                "local_qwen3-vl-8b-instruct",
+                "api_qwen3-vl-235b-a22b-instruct",
                 "--gt_file",
                 "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot/airplane-1_descriptions.jsonl",
                 "--image_root",
                 "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
                 "--output_dir",
                 "./SOIBench/vis_results",
-                "--show_human_baseline",
-                "--save_video",
-                "--fps",
-                "30"
+                "--show_human_baseline"
             ],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"

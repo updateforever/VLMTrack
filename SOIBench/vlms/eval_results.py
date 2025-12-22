@@ -52,13 +52,14 @@ def calculate_iou(box1, box2):
     return inter_area / union if union > 0 else 0.0
 
 
-def load_seq_data(jsonl_path, is_gt=False, load_human_baseline=False):
+def load_seq_data(jsonl_path, is_gt=False, load_human_baseline=False, skip_consecutive_frames=False):
     """
     加载单个序列文件，返回 {frame_idx: box} 字典
     参数:
         jsonl_path: JSONL 文件路径
         is_gt: 是否为 GT 文件
         load_human_baseline: 是否加载人类基线 (从 GT 文件的 pred_boxes 字段)
+        skip_consecutive_frames: 是否跳过连续帧 (True=严格模式, False=完整模式)
     返回:
         {frame_idx: box} 字典
     """
@@ -101,13 +102,17 @@ def load_seq_data(jsonl_path, is_gt=False, load_human_baseline=False):
                         
                 elif is_gt:
                     # GT 提取逻辑
-                    if not is_skip:
-                        box = item.get("gt_box") or item.get("bbox")
-                        # gt_box 格式: [[x1,y1], [x2,y2]] -> [x1,y1,x2,y2]
-                        if box and len(box) == 2 and len(box[0]) == 2:
-                            box = [box[0][0], box[0][1], box[1][0], box[1][1]]
-                        if box:
-                            data_map[fid] = box
+                    # 注意: 如果 skip_consecutive_frames=True，则跳过 skip 帧
+                    # 如果 skip_consecutive_frames=False，则加载所有帧（算法评测所有帧）
+                    if skip_consecutive_frames and is_skip:
+                        continue  # 严格模式: 跳过 skip 帧
+                    
+                    box = item.get("gt_box") or item.get("bbox")
+                    # gt_box 格式: [[x1,y1], [x2,y2]] -> [x1,y1,x2,y2]
+                    if box and len(box) == 2 and len(box[0]) == 2:
+                        box = [box[0][0], box[0][1], box[1][0], box[1][1]]
+                    if box:
+                        data_map[fid] = box
                 else:
                     # Pred 提取逻辑: 取第一个预测框
                     p_boxes = item.get("parsed_bboxes") or item.get("parsed_bbox")
@@ -120,7 +125,7 @@ def load_seq_data(jsonl_path, is_gt=False, load_human_baseline=False):
     return data_map
 
 
-def evaluate_dataset(ds_name, gt_root, pred_root, model_tags, add_human_baseline=False):
+def evaluate_dataset(ds_name, gt_root, pred_root, model_tags, add_human_baseline=False, skip_consecutive_frames=False):
     """
     评测单个数据集
     参数:
@@ -129,6 +134,9 @@ def evaluate_dataset(ds_name, gt_root, pred_root, model_tags, add_human_baseline
         pred_root: 预测结果根目录
         model_tags: 模型标签列表
         add_human_baseline: 是否添加人类基线
+        skip_consecutive_frames: 是否跳过连续帧
+            - True: 严格模式，算法和人类都只评测非 skip 帧
+            - False: 完整模式，算法评测所有帧，人类在 skip 帧复用上一帧
     返回:
         {model_name: [all_ious_list]} 字典
     """
@@ -148,7 +156,7 @@ def evaluate_dataset(ds_name, gt_root, pred_root, model_tags, add_human_baseline
         seq_name = os.path.basename(gt_path).replace("_descriptions.jsonl", "").replace(".jsonl", "")
         
         # 加载 GT {frame: box}
-        gt_map = load_seq_data(gt_path, is_gt=True)
+        gt_map = load_seq_data(gt_path, is_gt=True, skip_consecutive_frames=skip_consecutive_frames)
         if not gt_map:
             continue
         
@@ -265,6 +273,8 @@ def main():
     # 人类基线
     parser.add_argument("--add_human_baseline", action="store_true",
                         help="是否添加人类基线对比 (从 GT JSONL 的 pred_boxes 字段提取)")
+    parser.add_argument("--skip_consecutive_frames", action="store_true",
+                        help="是否跳过连续帧评测 (严格模式: 算法和人类都只评测 SOI 帧; 默认: 算法评测所有帧，人类复用)")
 
     args = parser.parse_args()
     
@@ -294,7 +304,7 @@ def main():
             continue
         
         # 计算该数据集下所有模型的 IoU
-        dataset_results = evaluate_dataset(ds_name, gt_root, args.pred_root, args.models, args.add_human_baseline)
+        dataset_results = evaluate_dataset(ds_name, gt_root, args.pred_root, args.models, args.add_human_baseline, args.skip_consecutive_frames)
         
         if not dataset_results:
             continue
