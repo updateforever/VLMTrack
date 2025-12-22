@@ -40,8 +40,11 @@ def calc_iou_overlap(pred_bb, anno_bb):
 def calc_seq_err_robust(pred_bb, anno_bb, dataset, target_visible=None):
     pred_bb = pred_bb.clone()
 
-    # Check if invalid values are present
-    if torch.isnan(pred_bb).any() or (pred_bb[:, 2:] < 0.0).any():
+    # 检测稀疏跟踪: NaN表示跳过的帧
+    sparse_tracking_mask = torch.isnan(pred_bb).any(dim=1)
+    
+    # Check if invalid values are present (排除NaN,那是稀疏跟踪的标记)
+    if (pred_bb[~sparse_tracking_mask][:, 2:] < 0.0).any():
         raise Exception('Error: Invalid results')
 
     if torch.isnan(anno_bb).any():
@@ -60,23 +63,32 @@ def calc_seq_err_robust(pred_bb, anno_bb, dataset, target_visible=None):
             if pred_bb.shape[0] > anno_bb.shape[0]:
                 # For monkey-17, there is a mismatch for some trackers.
                 pred_bb = pred_bb[:anno_bb.shape[0], :]
+                sparse_tracking_mask = sparse_tracking_mask[:anno_bb.shape[0]]
             else:
                 raise Exception('Mis-match in tracker prediction and GT lengths')
         else:
             # print('Warning: Mis-match in tracker prediction and GT lengths')
             if pred_bb.shape[0] > anno_bb.shape[0]:
                 pred_bb = pred_bb[:anno_bb.shape[0], :]
+                sparse_tracking_mask = sparse_tracking_mask[:anno_bb.shape[0]]
             else:
                 pad = torch.zeros((anno_bb.shape[0] - pred_bb.shape[0], 4)).type_as(pred_bb)
                 pred_bb = torch.cat((pred_bb, pad), dim=0)
+                pad_mask = torch.zeros(anno_bb.shape[0] - sparse_tracking_mask.shape[0], dtype=torch.bool)
+                sparse_tracking_mask = torch.cat((sparse_tracking_mask, pad_mask), dim=0)
 
     pred_bb[0, :] = anno_bb[0, :]
 
     if target_visible is not None:
         target_visible = target_visible.bool()
-        valid = ((anno_bb[:, 2:] > 0.0).sum(1) == 2) & target_visible
+        # 稀疏跟踪: NaN帧不参与评估
+        valid = ((anno_bb[:, 2:] > 0.0).sum(1) == 2) & target_visible & (~sparse_tracking_mask)
     else:
-        valid = ((anno_bb[:, 2:] > 0.0).sum(1) == 2)
+        # 稀疏跟踪: NaN帧不参与评估
+        valid = ((anno_bb[:, 2:] > 0.0).sum(1) == 2) & (~sparse_tracking_mask)
+    
+    # 对于稀疏跟踪的NaN帧,填充0避免计算错误
+    pred_bb[sparse_tracking_mask] = 0.0
 
     err_center = calc_err_center(pred_bb, anno_bb)
     err_center_normalized = calc_err_center(pred_bb, anno_bb, normalized=True)

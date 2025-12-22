@@ -49,10 +49,13 @@ MODEL_CONFIGS = {
     },
     
     # API Models (支持多线程!)
+    # http://10.128.202.100:3010/v1 
+    # https://dashscope.aliyuncs.com/compatible-mode/v1
+
     'qwen3vl_api': {
         'mode': 'api',
-        'api_model': 'qwen3-vl-235b-a22b-instruct',
-        'api_base_url': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        'api_model': 'qwen3-vl-plus-2025-09-23',  #'qwen3-vl-235b-a22b-instruct',
+        'api_base_url': 'http://10.128.202.100:3010/v1',
     },
     'qwen25vl_api': {
         'mode': 'api',
@@ -106,6 +109,14 @@ def parameters(yaml_name: str = "qwen3vl_4b"):
     # =========== Debug设置 ===========
     # 0: 无输出, 1: 打印信息, 2: 保存可视化, 3: 实时显示
     params.debug = 0
+    
+    # =========== 关键帧跟踪 (Keyframe Tracking) ===========
+    # 启用稀疏跟踪模式: 只在场景变化关键帧推理,非关键帧直接跳过
+    # 结果只包含关键帧的bbox,评估时也只在关键帧上计算指标
+    params.use_keyframe = False
+    # 关键帧索引文件根目录 (包含scene_changes_clip结果)
+    # 例如: "D:/CODE/SUTrack/scene_changes_clip/tnl2k_scene_changes_clip"
+    params.keyframe_root = None
     
     params.save_all_boxes = False
     params.checkpoint = None

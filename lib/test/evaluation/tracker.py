@@ -141,6 +141,12 @@ class Tracker:
             info['previous_output'] = prev_output
 
             out = tracker.track(image, info)
+            
+            # 处理稀疏跟踪: 如果返回None则填充NaN (保持完整长度)
+            if out is None:
+                # 非关键帧: 填充NaN bbox
+                out = {'target_bbox': [float('nan')] * 4}
+            
             prev_output = OrderedDict(out)
             _store_outputs(out, {'time': time.time() - start_time})
 

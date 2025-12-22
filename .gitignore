@@ -1,10 +1,12 @@
 Qwen3-VL-main/
 Qwen3-VL-main.zip
-# 忽略所有 .pyc 结尾的文件
-*.pyc
 
-# 忽略 Python 3 自动生成的缓存文件夹 (非常重要)
+# Python cache
+*.pyc
 __pycache__/
 
-test/
+# Scene changes
 scene_changes_clip/
+
+# Results (optional, uncomment if needed)
+# results/

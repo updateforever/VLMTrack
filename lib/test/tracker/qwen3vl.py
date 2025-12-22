@@ -22,7 +22,8 @@ import time
 import base64
 import io
 from PIL import Image
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import List, Optional, Tuple, Set
 
 
 # ============== Bbox Parsing Utils ==============
@@ -151,6 +152,84 @@ def numpy_to_base64(image: np.ndarray) -> str:
     return b64
 
 
+# ============== Keyframe Tracking Utils ==============
+
+def read_keyframe_indices(jsonl_root: str, seq_name: str) -> Optional[Set[int]]:
+    """
+    读取关键帧索引 (场景变化检测结果)
+    
+    支持路径:
+    - jsonl_root/category/seq_name.jsonl
+    - jsonl_root/seq_name.jsonl
+    - jsonl_root/category/seq_name_done.jsonl
+    
+    格式: {"changes": [0, 104, 172, ...], "total_frames": 543}
+    """
+    if not jsonl_root:
+        return None
+    
+    root = Path(jsonl_root)
+    if not root.exists():
+        return None
+    
+    # 提取category
+    cat = seq_name.rsplit('-', 1)[0] if '-' in seq_name else seq_name
+    
+    # 尝试多种文件名
+    candidates = [
+        root / cat / f"{seq_name}.jsonl",
+        root / cat / f"{seq_name}_done.jsonl",
+        root / f"{seq_name}.jsonl",
+        root / f"{seq_name}_done.jsonl",
+    ]
+    
+    target = next((p for p in candidates if p.exists()), None)
+    if not target:
+        return None
+    
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            line = f.readline().strip()
+            if not line:
+                return None
+            
+            data = json.loads(line)
+            
+            # 支持多种格式
+            if isinstance(data, list):
+                return set(data)
+            
+            if isinstance(data, dict):
+                if "changes" in data:
+                    return set(data["changes"])
+                if "keyframes" in data:
+                    return set(data["keyframes"])
+            
+            return None
+    except Exception as e:
+        print(f"[Keyframe] Error reading {target}: {e}")
+        return None
+
+
+def interpolate_bbox(bbox1: List[float], bbox2: List[float], 
+                     frame1: int, frame2: int, current: int) -> List[float]:
+    """
+    线性插值两个bbox
+    """
+    if frame1 == frame2:
+        return bbox1
+    
+    alpha = (current - frame1) / (frame2 - frame1)
+    alpha = max(0.0, min(1.0, alpha))
+    
+    return [
+        bbox1[0] + alpha * (bbox2[0] - bbox1[0]),
+        bbox1[1] + alpha * (bbox2[1] - bbox1[1]),
+        bbox1[2] + alpha * (bbox2[2] - bbox1[2]),
+        bbox1[3] + alpha * (bbox2[3] - bbox1[3]),
+    ]
+
+
 # ============== API Inference ==============
 
 def qwen3vl_api_chat(
@@ -234,6 +313,12 @@ class QWEN3VL(BaseTracker):
         self.language_description = None
         self.frame_id = 0
         self.seq_name = None
+        
+        # Keyframe Tracking
+        self.keyframe_indices = None
+        self.keyframe_results = {}  # {frame_idx: bbox}
+        self.use_keyframe = getattr(params, 'use_keyframe', False)
+        self.keyframe_root = getattr(params, 'keyframe_root', None)
         
         # Debug & Visualization
         self.debug = getattr(params, 'debug', 0)
@@ -393,6 +478,15 @@ class QWEN3VL(BaseTracker):
         if not self.language_description:
             self.language_description = "the target object marked in green box"
         
+        # 关键帧跟踪初始化
+        if self.use_keyframe and self.keyframe_root:
+            self.keyframe_indices = read_keyframe_indices(self.keyframe_root, self.seq_name)
+            if self.keyframe_indices:
+                print(f"[Qwen3VL] Keyframe mode: {len(self.keyframe_indices)} keyframes")
+            else:
+                print(f"[Qwen3VL] Keyframe file not found, using full tracking")
+                self.use_keyframe = False
+        
         # 设置可视化目录 (与results路径一致)
         if self.debug >= 2:
             env = env_settings()
@@ -400,12 +494,21 @@ class QWEN3VL(BaseTracker):
             os.makedirs(self.vis_dir, exist_ok=True)
         
         if self.debug >= 1:
-            print(f"[Qwen3VL] Initialize: bbox={self.state}, mode={self.mode}")
+            mode_str = f"{self.mode} + keyframe" if self.use_keyframe else self.mode
+            print(f"[Qwen3VL] Initialize: bbox={self.state}, mode={mode_str}")
     
     def track(self, image, info: dict = None):
-        """跟踪当前帧"""
+        """跟踪当前帧 (稀疏模式: 非关键帧直接跳过)"""
         self.frame_id += 1
         H, W = image.shape[:2]
+        
+        # 关键帧模式: 非关键帧直接跳过
+        if self.use_keyframe and self.keyframe_indices:
+            if self.frame_id not in self.keyframe_indices:
+                # 非关键帧: 跳过不处理
+                if self.debug >= 1:
+                    print(f"[Qwen3VL] Frame {self.frame_id}: Skipped (non-keyframe)")
+                return None  # 返回None表示跳过此帧
         
         try:
             # 1. 模板画框 (在内存中)
@@ -420,7 +523,8 @@ class QWEN3VL(BaseTracker):
             output_text = self._run_inference(template_with_bbox, image, prompt)
             
             if self.debug >= 1:
-                print(f"[Qwen3VL] Frame {self.frame_id}: {output_text[:100]}...")
+                kf_tag = "[KF]" if self.use_keyframe else ""
+                print(f"[Qwen3VL] Frame {self.frame_id}{kf_tag}: {output_text[:100]}...")
             
             # 4. 解析bbox
             bbox_xyxy = extract_bbox_from_model_output(output_text, W, H)
@@ -428,6 +532,10 @@ class QWEN3VL(BaseTracker):
             if bbox_xyxy is not None:
                 pred_bbox = xyxy_to_xywh(bbox_xyxy)
                 self.state = pred_bbox
+                
+                # 缓存关键帧结果
+                if self.use_keyframe:
+                    self.keyframe_results[self.frame_id] = pred_bbox
                 
                 self._save_visualization(template_with_bbox, image, pred_bbox, self.frame_id)
                 
@@ -445,6 +553,40 @@ class QWEN3VL(BaseTracker):
             self.state = [0, 0, 0, 0]
         
         return {"target_bbox": self.state}
+    
+    def _get_interpolated_bbox(self, frame_idx: int) -> Optional[List[float]]:
+        """获取插值bbox (用于非关键帧)"""
+        if len(self.keyframe_results) < 2:
+            # 不足两个关键帧,使用最后一个
+            if self.keyframe_results:
+                return list(self.keyframe_results.values())[-1]
+            return None
+        
+        sorted_kf = sorted(self.keyframe_indices)
+        
+        # 找前后关键帧
+        prev_frames = [k for k in sorted_kf if k < frame_idx and k in self.keyframe_results]
+        next_frames = [k for k in sorted_kf if k > frame_idx and k in self.keyframe_results]
+        
+        if not prev_frames:
+            # 在第一个关键帧之前
+            first_kf = sorted_kf[0]
+            return self.keyframe_results.get(first_kf)
+        
+        if not next_frames:
+            # 在最后一个关键帧之后
+            return self.keyframe_results.get(prev_frames[-1])
+        
+        # 线性插值
+        frame1 = prev_frames[-1]
+        frame2 = next_frames[0]
+        bbox1 = self.keyframe_results.get(frame1)
+        bbox2 = self.keyframe_results.get(frame2)
+        
+        if bbox1 and bbox2:
+            return interpolate_bbox(bbox1, bbox2, frame1, frame2, frame_idx)
+        
+        return bbox1 or bbox2
 
 
 def get_tracker_class():
