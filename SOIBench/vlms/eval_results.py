@@ -93,7 +93,7 @@ def load_seq_data(jsonl_path, is_gt=False, load_human_baseline=False):
                         # 非 skip 帧: 提取 pred_boxes
                         if pred_boxes and len(pred_boxes) > 0:
                             # pred_boxes 格式: [[x1,y1], [x2,y2]] -> [x1,y1,x2,y2]
-                            box = pred_boxes[0]
+                            box = pred_boxes
                             if len(box) == 2 and len(box[0]) == 2:
                                 box = [box[0][0], box[0][1], box[1][0], box[1][1]]
                             last_valid_box = box
