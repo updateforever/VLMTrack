@@ -1,0 +1,134 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Python 调试程序: 当前文件",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+
+        {
+            "name": "Qwen3VL Local - TNL2K",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tracking/test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "qwen3vl",
+                "qwen3vl_4b",
+                "--dataset",
+                "tnl2k",
+                "--threads",
+                "0"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "Qwen3VL Local - LaSOT",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tracking/test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "qwen3vl",
+                "qwen3vl_4b",
+                "--dataset",
+                "lasot",
+                "--threads",
+                "0"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "Qwen3VL API - TNL2K (单线程)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tracking/test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "qwen3vl",
+                "qwen3vl_api",
+                "--dataset",
+                "tnl2k",
+                "--threads",
+                "0",
+                "--debug",
+                "1"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "DASHSCOPE_API_KEY": "sk-61547e720ce8407aa44f4511051903b0"
+                //  https://dashscope.aliyuncs.com/compatible-mode/v1
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "Qwen3VL API - LaSOT (多线程)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tracking/test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "qwen3vl",
+                "qwen3vl_api",
+                "--dataset",
+                "lasot",
+                "--threads",
+                "4"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "DASHSCOPE_API_KEY": "your-api-key-here"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "Qwen3VL Quick Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tracking/test_qwen3vl.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--debug",
+                "1"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "Qwen3VL Local - Debug 可视化",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tracking/test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "qwen3vl",
+                "qwen3vl_4b",
+                "--dataset",
+                "tnl2k",
+                "--threads",
+                "0",
+                "--sequence",
+                "0"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        }
+    ]
+}
