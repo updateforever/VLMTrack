@@ -15,3 +15,6 @@ scene_changes_clip/
 # results/
 SOIBench/results/
 SOIBench/eval_results/
+
+# VSCode debug configurations (use launch.json.example as template)
+.vscode/launch.json
