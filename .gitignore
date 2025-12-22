@@ -5,3 +5,6 @@ Qwen3-VL-main.zip
 
 # 忽略 Python 3 自动生成的缓存文件夹 (非常重要)
 __pycache__/
+
+test/
+scene_changes_clip/
