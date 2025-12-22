@@ -19,6 +19,41 @@ from prettytable import PrettyTable
 from tqdm import tqdm
 
 
+# 默认模型名映射表（存储名 -> 显示名）
+DEFAULT_MODEL_NAME_MAP = {
+    # Qwen3VL 系列
+    "local_qwen3-vl-4b-instruct": "Qwen3-VL-4B",
+    "local_qwen3-vl-8b-instruct": "Qwen3-VL-8B",
+    "api_qwen3-vl-235b-a22b-instruct": "Qwen3-VL-235B",
+    "qwen3vl_4b": "Qwen3-VL-4B",
+    "qwen3vl_api": "Qwen3-VL-API",
+    
+    # 其他常见模型
+    "gpt4v": "GPT-4V",
+    "gemini": "Gemini-Pro",
+    "claude": "Claude-3",
+    
+    # 人类基线
+    "Human_Baseline": "Human",
+}
+
+
+def get_display_name(model_tag, name_map=None):
+    """
+    获取模型的显示名称
+    参数:
+        model_tag: 模型存储标签
+        name_map: 自定义名称映射字典
+    返回:
+        显示名称
+    """
+    if name_map and model_tag in name_map:
+        return name_map[model_tag]
+    if model_tag in DEFAULT_MODEL_NAME_MAP:
+        return DEFAULT_MODEL_NAME_MAP[model_tag]
+    return model_tag  # 如果没有映射，返回原始名称
+
+
 def calculate_iou(box1, box2):
     """
     计算两个 bbox 的 IoU
@@ -201,13 +236,14 @@ def evaluate_dataset(ds_name, gt_root, pred_root, model_tags, add_human_baseline
     return model_ious
 
 
-def plot_success_curves(results, output_dir, ds_name):
+def plot_success_curves(results, output_dir, ds_name, name_map=None):
     """
     绘制 Success Plot (成功率曲线)
     参数:
         results: {model_name: [iou_list]} 字典
         output_dir: 输出目录
         ds_name: 数据集名称
+        name_map: 模型名称映射字典
     """
     plt.figure(figsize=(10, 7))
     plt.title(f"Success Plot - {ds_name.upper()}", fontsize=16)
@@ -237,7 +273,8 @@ def plot_success_curves(results, output_dir, ds_name):
     
     # 绘制曲线
     for model_name, auc, curve in model_stats:
-        plt.plot(thresholds, curve, linewidth=2, label=f"{model_name} [{auc:.3f}]")
+        display_name = get_display_name(model_name, name_map)
+        plt.plot(thresholds, curve, linewidth=2, label=f"{display_name} [{auc:.3f}]")
         
     plt.legend(loc='lower left', fontsize=12)
     
@@ -275,8 +312,18 @@ def main():
                         help="是否添加人类基线对比 (从 GT JSONL 的 pred_boxes 字段提取)")
     parser.add_argument("--skip_consecutive_frames", action="store_true",
                         help="是否跳过连续帧评测 (严格模式: 算法和人类都只评测 SOI 帧; 默认: 算法评测所有帧，人类复用)")
+    parser.add_argument("--model_names", type=str, default=None,
+                        help="模型名称映射，格式: 'tag1:Name1,tag2:Name2'，例如: 'local_qwen3-vl-4b:Qwen-4B,api_model:API-Model'")
 
     args = parser.parse_args()
+    
+    # 解析自定义模型名映射
+    custom_name_map = {}
+    if args.model_names:
+        for pair in args.model_names.split(','):
+            if ':' in pair:
+                tag, name = pair.split(':', 1)
+                custom_name_map[tag.strip()] = name.strip()
     
     os.makedirs(args.output_dir, exist_ok=True)
     
@@ -317,11 +364,11 @@ def main():
             all_dataset_results[model].extend(dataset_results[model])
         
         # 绘制该数据集的 Success Plot
-        plot_success_curves(dataset_results, args.output_dir, ds_name)
+        plot_success_curves(dataset_results, args.output_dir, ds_name, custom_name_map)
     
     # 绘制整体 SOIBench Success Plot
     if any(all_dataset_results.values()):
-        plot_success_curves(all_dataset_results, args.output_dir, "SOIBench_Overall")
+        plot_success_curves(all_dataset_results, args.output_dir, "SOIBench_Overall", custom_name_map)
     
     # 生成报告表格
     print("\n" + "="*60)
@@ -351,7 +398,7 @@ def main():
             # OP@0.75: IoU >= 0.75 的比例
             op75 = np.mean(ious >= 0.75)
             
-            overall_table.add_row([model, f"{auc:.3f}", f"{op50:.3f}", f"{op75:.3f}", len(ious)])
+            overall_table.add_row([get_display_name(model, custom_name_map), f"{auc:.3f}", f"{op50:.3f}", f"{op75:.3f}", len(ious)])
         
         print(overall_table)
     
@@ -384,7 +431,7 @@ def main():
                 # OP@0.75: IoU >= 0.75 的比例
                 op75 = np.mean(ious >= 0.75)
                 
-                detail_table.add_row([ds_name, model, f"{auc:.3f}", f"{op50:.3f}", f"{op75:.3f}", len(ious)])
+                detail_table.add_row([ds_name, get_display_name(model, custom_name_map), f"{auc:.3f}", f"{op50:.3f}", f"{op75:.3f}", len(ious)])
             
             detail_table.add_row(["---", "---", "---", "---", "---", "---"])
         
