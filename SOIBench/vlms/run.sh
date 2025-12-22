@@ -9,7 +9,7 @@ set -e
 
 PY_SCRIPT="SOIBench/vlms/run_grounding_qwen3vl.py"
 
-OUTPUT_ROOT="/home/member/data2/wyp/SOT/SUTrack/SOIBench/results"
+OUTPUT_ROOT="/home/member/data2/wyp/SOT/VLMTrack/SOIBench/results"
 EXP_TAG="qwen3-vl-32b-instruct"
 
 LOG_DIR="${OUTPUT_ROOT}/logs"
