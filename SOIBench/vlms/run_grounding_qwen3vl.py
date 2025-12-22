@@ -15,7 +15,6 @@ import glob
 import json
 import os
 import re
-import traceback
 from pathlib import Path
 
 from tqdm import tqdm
@@ -24,20 +23,16 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 from qwen3vl_infer import Qwen3VLLocalEngine, qwen3vl_api_chat
 
 
-DATASET_IMAGE_ROOTS = {
-    "lasot": "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
-    "mgit":  "/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/MGIT-Test/data/test",
-    "tnl2k": "/home/member/data1/DATASETS_PUBLIC/TNL2K/TNL2K_CVPR2021/test"
-}
-
-
 _ADDITIONAL_COLORS = [name for (name, _) in ImageColor.colormap.items()]
 
 
 def plot_bounding_boxes(im: Image.Image, bboxes, save_path: str):
     """
     在图上画 bbox
-    bboxes: List[List[float]]，每个为 [x1,y1,x2,y2] 像素坐标
+    参数:
+        im: PIL Image 对象
+        bboxes: List[List[float]]，每个为 [x1,y1,x2,y2] 像素坐标
+        save_path: 保存路径
     """
     if not bboxes:
         return
@@ -63,7 +58,7 @@ def plot_bounding_boxes(im: Image.Image, bboxes, save_path: str):
 
 def _strip_code_fence(text: str) -> str:
     """
-    去掉 ```json / ``` 等包裹
+    去掉 ```json / ``` 等代码块包裹
     """
     if not text:
         return ""
@@ -86,24 +81,34 @@ def _safe_float_list(x):
 
 
 def _clamp(v, lo, hi):
+    """将值限制在 [lo, hi] 范围内"""
     return max(lo, min(hi, v))
 
 
 def _fix_and_clip_bbox(b, w, h):
     """
-    修正顺序并裁剪到图像范围
+    修正 bbox 坐标顺序并裁剪到图像范围内
+    参数:
+        b: [x1, y1, x2, y2]
+        w: 图像宽度
+        h: 图像高度
+    返回:
+        修正后的 bbox
     """
     x1, y1, x2, y2 = b
+    # 确保 x1 < x2, y1 < y2
     if x2 < x1:
         x1, x2 = x2, x1
     if y2 < y1:
         y1, y2 = y2, y1
 
+    # 裁剪到图像范围
     x1 = _clamp(x1, 0.0, float(w - 1))
     y1 = _clamp(y1, 0.0, float(h - 1))
     x2 = _clamp(x2, 0.0, float(w - 1))
     y2 = _clamp(y2, 0.0, float(h - 1))
 
+    # 确保 bbox 至少有 1 像素宽高
     if abs(x2 - x1) < 1.0:
         x2 = _clamp(x1 + 1.0, 0.0, float(w - 1))
     if abs(y2 - y1) < 1.0:
@@ -115,32 +120,47 @@ def _fix_and_clip_bbox(b, w, h):
 def _convert_to_pixel_bbox(b, w, h):
     """
     支持三类坐标体系并统一成像素坐标
-    1）0 到 1 归一化
-    2）0 到 1000 归一化
+    1）0 到 1 归一化坐标
+    2）0 到 1000 归一化坐标
     3）像素坐标
+    参数:
+        b: [x1, y1, x2, y2]
+        w: 图像宽度
+        h: 图像高度
+    返回:
+        像素坐标 [x1, y1, x2, y2]
     """
     x1, y1, x2, y2 = b
     maxv = max(x1, y1, x2, y2)
     minv = min(x1, y1, x2, y2)
 
+    # 判断是 0-1 归一化
     if 0.0 <= minv and maxv <= 1.0:
         return [x1 * w, y1 * h, x2 * w, y2 * h]
 
+    # 判断是 0-1000 归一化
     if 0.0 <= minv and maxv <= 1000.0:
         return [(x1 / 1000.0) * w, (y1 / 1000.0) * h, (x2 / 1000.0) * w, (y2 / 1000.0) * h]
 
+    # 否则认为是像素坐标
     return [x1, y1, x2, y2]
 
 
 def extract_bboxes_from_model_output(text: str, img_width: int, img_height: int):
     """
-    bbox 解析
-    支持：
+    从模型输出中解析 bbox
+    支持多种格式:
     1）JSON: {"bbox_2d":[...]} 或 [{"bbox_2d":[...]}]
     2）JSON: [x1,y1,x2,y2]
     3）文本中包含多个 [x1,y1,x2,y2]
     4）兼容 0 到 1，0 到 1000，像素坐标
-    返回：List[[x1,y1,x2,y2]]，像素坐标
+    
+    参数:
+        text: 模型输出文本
+        img_width: 图像宽度
+        img_height: 图像高度
+    返回:
+        List[[x1,y1,x2,y2]]，像素坐标
     """
     raw = text or ""
     t = _strip_code_fence(raw)
@@ -149,16 +169,19 @@ def extract_bboxes_from_model_output(text: str, img_width: int, img_height: int)
 
     bboxes = []
 
+    # 尝试解析 JSON
     try:
         data = json.loads(t)
 
         if isinstance(data, dict):
+            # 单个 bbox: {"bbox_2d": [x1,y1,x2,y2]}
             if "bbox_2d" in data:
                 b = _safe_float_list(data["bbox_2d"])
                 if b:
                     b = _convert_to_pixel_bbox(b, img_width, img_height)
                     bboxes.append(_fix_and_clip_bbox(b, img_width, img_height))
 
+            # 多个 bbox: {"bboxes": [{...}, {...}]}
             if "bboxes" in data and isinstance(data["bboxes"], list):
                 for it in data["bboxes"]:
                     if isinstance(it, dict) and "bbox_2d" in it:
@@ -170,11 +193,13 @@ def extract_bboxes_from_model_output(text: str, img_width: int, img_height: int)
                         bboxes.append(_fix_and_clip_bbox(b, img_width, img_height))
 
         elif isinstance(data, list):
+            # 直接是一个 bbox: [x1,y1,x2,y2]
             if len(data) == 4 and all(isinstance(x, (int, float)) for x in data):
                 b = [float(x) for x in data]
                 b = _convert_to_pixel_bbox(b, img_width, img_height)
                 bboxes.append(_fix_and_clip_bbox(b, img_width, img_height))
             else:
+                # 多个 bbox: [[x1,y1,x2,y2], ...] 或 [{"bbox_2d": ...}, ...]
                 for it in data:
                     if isinstance(it, dict) and "bbox_2d" in it:
                         b = _safe_float_list(it["bbox_2d"])
@@ -190,6 +215,7 @@ def extract_bboxes_from_model_output(text: str, img_width: int, img_height: int)
     except Exception:
         pass
 
+    # JSON 解析失败，尝试正则匹配 [x1,y1,x2,y2]
     matches = re.findall(r"\[([^\[\]]+)\]", t)
     for m in matches:
         nums = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", m)
@@ -204,12 +230,19 @@ def extract_bboxes_from_model_output(text: str, img_width: int, img_height: int)
     return bboxes
 
 
-def load_and_fix_paths(jsonl_path: str, dataset_name: str):
+def load_and_fix_paths(jsonl_path: str, dataset_name: str, image_roots: dict):
     """
     读取描述 jsonl，并把 image_path 修复为绝对路径
     抽取 output-en 的 level1 到 level4 拼成描述文本
+    
+    参数:
+        jsonl_path: jsonl 文件路径
+        dataset_name: 数据集名称
+        image_roots: 数据集图像根目录字典
+    返回:
+        有效样本列表
     """
-    image_root = DATASET_IMAGE_ROOTS.get(dataset_name)
+    image_root = image_roots.get(dataset_name)
     if not image_root:
         return []
 
@@ -220,9 +253,11 @@ def load_and_fix_paths(jsonl_path: str, dataset_name: str):
                 continue
             item = json.loads(line)
 
+            # 跳过标记为 skip 的帧
             if item.get("status") == "skip":
                 continue
 
+            # 提取描述文本
             output_en = item.get("output-en", {}) or {}
             desc_parts = []
             for k in ["level1", "level2", "level3", "level4"]:
@@ -234,14 +269,35 @@ def load_and_fix_paths(jsonl_path: str, dataset_name: str):
             if not full_desc:
                 continue
 
+            # 修复图像路径
             rel = item.get("image_path", "")
             if not rel:
                 continue
             if rel.startswith("/"):
                 rel = rel[1:]
-            abs_path = os.path.join(image_root, rel)
+            
+            # 尝试多种路径组合方式
+            possible_paths = [
+                os.path.join(image_root, rel),
+            ]
+            
+            # LaSOT 特殊路径: 需要在中间插入年份目录
+            if len(rel) > 10:
+                possible_paths.append(os.path.join(image_root, rel[6:10], rel))
+            
+            # MGIT/TNL2K 特殊路径
+            if len(rel.split('/')) > 2:
+                parts = rel.split('/')
+                possible_paths.append(os.path.join(image_root, parts[1], 'imgs', parts[2][1:]))
+                possible_paths.append(os.path.join(image_root, parts[1], 'imgs', parts[2]))
 
-            if os.path.exists(abs_path):
+            abs_path = None
+            for p in possible_paths:
+                if p and os.path.exists(p):
+                    abs_path = p
+                    break
+            
+            if abs_path:
                 valid.append({
                     "original_item": item,
                     "image_path": abs_path,
@@ -249,43 +305,13 @@ def load_and_fix_paths(jsonl_path: str, dataset_name: str):
                     "dataset_name": dataset_name,
                     "frame_idx": item.get("frame_idx", "unknown"),
                 })
-            elif os.path.exists(os.path.join(image_root, rel[6:10], rel)):
-                abs_path = os.path.join(image_root, rel[6:10], rel)
-                valid.append({
-                    "original_item": item,
-                    "image_path": abs_path,
-                    "text_prompt": full_desc,
-                    "dataset_name": dataset_name,
-                    "frame_idx": item.get("frame_idx", "unknown"),
-                })
-            elif os.path.exists(os.path.join(image_root, rel.split('/')[1], 'imgs', rel.split('/')[2][1:])):
-                abs_path = os.path.join(image_root, rel.split('/')[1], 'imgs', rel.split('/')[2][1:])
-                valid.append({
-                    "original_item": item,
-                    "image_path": abs_path,
-                    "text_prompt": full_desc,
-                    "dataset_name": dataset_name,
-                    "frame_idx": item.get("frame_idx", "unknown"),
-                })
-            elif os.path.exists(os.path.join(image_root, rel.split('/')[1], 'imgs', rel.split('/')[2])):
-                abs_path = os.path.join(image_root, rel.split('/')[1], 'imgs', rel.split('/')[2])
-                valid.append({
-                    "original_item": item,
-                    "image_path": abs_path,
-                    "text_prompt": full_desc,
-                    "dataset_name": dataset_name,
-                    "frame_idx": item.get("frame_idx", "unknown"),
-                })
-            else:
-                print('error for img load')
 
     return valid
 
 
 def build_prompt(description: str) -> str:
     """
-    Grounding prompt，强约束输出格式
-    坐标强制使用 0 到 1000 归一化，减少模型输出形态漂移
+    构建 Grounding prompt
     """
     return (
         "You are a visual grounding model. Given an image and a target description, output the target bounding box.\n"
@@ -308,48 +334,94 @@ def _count_lines(path: str) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="SOIBench Grounding 评测脚本")
 
-    parser.add_argument("--mode", type=str, default="local", choices=["local", "api"])
-    parser.add_argument("--model_path", type=str, default="")
-    parser.add_argument("--max_new_tokens", type=int, default=256)
+    # 推理模式
+    parser.add_argument("--mode", type=str, default="local", choices=["local", "api"],
+                        help="推理模式: local(本地) 或 api(API调用)")
+    parser.add_argument("--model_path", type=str, default="",
+                        help="本地模型路径 (mode=local 时必需)")
+    parser.add_argument("--max_new_tokens", type=int, default=256,
+                        help="最大生成 token 数")
 
-    parser.add_argument("--api_model_name", type=str, default="qwen-vl-max")
-    parser.add_argument("--api_base_url", type=str, default="https://dashscope.aliyuncs.com/compatible-mode/v1")
-    parser.add_argument("--api_key_env", type=str, default="sk-61547e720ce8407aa44f4511051903b0")
-    parser.add_argument("--api_temperature", type=float, default=0.1)
-    parser.add_argument("--api_max_tokens", type=int, default=256)
-    parser.add_argument("--api_retries", type=int, default=3)
+    # API 配置
+    parser.add_argument("--api_model_name", type=str, default="qwen-vl-max",
+                        help="API 模型名称")
+    parser.add_argument("--api_base_url", type=str, 
+                        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        help="API base URL")
+    parser.add_argument("--api_key_env", type=str, default="sk-61547e720ce8407aa44f4511051903b0",
+                        help="API key")
+    parser.add_argument("--api_temperature", type=float, default=0.1,
+                        help="API 温度参数")
+    parser.add_argument("--api_max_tokens", type=int, default=256,
+                        help="API 最大 token 数")
+    parser.add_argument("--api_retries", type=int, default=3,
+                        help="API 重试次数")
 
-    parser.add_argument("--exp_tag", type=str, default="run")
-    parser.add_argument("--save_debug_vis", action="store_true")
+    # 实验配置
+    parser.add_argument("--exp_tag", type=str, default="run",
+                        help="实验标签")
+    parser.add_argument("--save_debug_vis", action="store_true",
+                        help="是否保存调试可视化")
 
-    parser.add_argument("--lasot_dir", type=str, default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot")
-    parser.add_argument("--mgit_dir", type=str, default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit")
-    parser.add_argument("--tnl2k_dir", type=str, default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k")
+    # 数据集图像根目录
+    parser.add_argument("--lasot_root", type=str, 
+                        default="/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
+                        help="LaSOT 数据集图像根目录")
+    parser.add_argument("--mgit_root", type=str, 
+                        default="/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/MGIT-Test/data/test",
+                        help="MGIT 数据集图像根目录")
+    parser.add_argument("--tnl2k_root", type=str, 
+                        default="/home/member/data1/DATASETS_PUBLIC/TNL2K/TNL2K_CVPR2021/test",
+                        help="TNL2K 数据集图像根目录")
 
-    parser.add_argument("--output_root", type=str, default="./results")
+    # JSONL 描述文件目录
+    parser.add_argument("--lasot_jsonl", type=str, 
+                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot",
+                        help="LaSOT JSONL 描述文件目录")
+    parser.add_argument("--mgit_jsonl", type=str, 
+                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit",
+                        help="MGIT JSONL 描述文件目录")
+    parser.add_argument("--tnl2k_jsonl", type=str, 
+                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k",
+                        help="TNL2K JSONL 描述文件目录")
+
+    # 输出目录
+    parser.add_argument("--output_root", type=str, default="./results",
+                        help="结果保存根目录")
 
     args = parser.parse_args()
 
+    # 构建图像根目录字典
+    image_roots = {
+        "lasot": args.lasot_root,
+        "mgit": args.mgit_root,
+        "tnl2k": args.tnl2k_root
+    }
+
+    # 初始化推理引擎
     engine = None
     if args.mode == "local":
         if not args.model_path:
             raise ValueError("mode=local 时必须提供 --model_path")
+        print(f"🚀 加载本地模型: {args.model_path}")
         engine = Qwen3VLLocalEngine(args.model_path)
 
+    # 构建任务列表
     tasks = []
-    if args.lasot_dir:
-        tasks.append(("lasot", args.lasot_dir))
-    if args.mgit_dir:
-        tasks.append(("mgit", args.mgit_dir))
-    if args.tnl2k_dir:
-        tasks.append(("tnl2k", args.tnl2k_dir))
+    if args.lasot_jsonl and os.path.exists(args.lasot_jsonl):
+        tasks.append(("lasot", args.lasot_jsonl))
+    if args.mgit_jsonl and os.path.exists(args.mgit_jsonl):
+        tasks.append(("mgit", args.mgit_jsonl))
+    if args.tnl2k_jsonl and os.path.exists(args.tnl2k_jsonl):
+        tasks.append(("tnl2k", args.tnl2k_jsonl))
 
     if not tasks:
-        print("未指定任何数据目录")
+        print("❌ 未指定任何有效的数据目录")
         return
 
+    # 处理每个数据集
     for dataset_name, jsonl_dir in tasks:
         out_dir = os.path.join(args.output_root, dataset_name, f"{args.mode}_{args.exp_tag}")
         os.makedirs(out_dir, exist_ok=True)
@@ -361,32 +433,36 @@ def main():
 
         jsonl_files = sorted(glob.glob(os.path.join(jsonl_dir, "*.jsonl")))
         if not jsonl_files:
-            print(f"目录为空: {jsonl_dir}")
+            print(f"⚠️  目录为空: {jsonl_dir}")
             continue
+
+        print(f"\n📂 处理数据集: {dataset_name} ({len(jsonl_files)} 个序列)")
 
         for jsonl_file in tqdm(jsonl_files, desc=f"处理 {dataset_name}", dynamic_ncols=True):
             seq_name = Path(jsonl_file).stem.replace("_descriptions", "").replace("_done", "")
             save_path = os.path.join(out_dir, f"{seq_name}_pred.jsonl")
-            err_path = os.path.join(out_dir, f"{seq_name}_errors.jsonl")
 
+            # 断点续跑: 检查已处理的行数
             processed = _count_lines(save_path)
-            samples = load_and_fix_paths(jsonl_file, dataset_name)
+            samples = load_and_fix_paths(jsonl_file, dataset_name, image_roots)
 
             if processed >= len(samples):
                 continue
 
             pending = samples[processed:]
 
+            # 创建输出文件
             if not os.path.exists(save_path):
                 with open(save_path, "w", encoding="utf-8"):
                     pass
 
+            # 处理每一帧
             for s in tqdm(pending, desc=f"序列 {seq_name}", leave=False, dynamic_ncols=True):
                 img_path = s["image_path"]
-                # try:
                 
                 prompt = build_prompt(s["text_prompt"])
 
+                # 调用推理引擎
                 if args.mode == "local":
                     raw_out = engine.chat(img_path, prompt, max_new_tokens=args.max_new_tokens)
                 else:
@@ -402,6 +478,7 @@ def main():
                         retry_sleep=1.0,
                     )
 
+                # 处理空输出
                 if not raw_out:
                     record = s["original_item"].copy()
                     record["model_raw_response"] = raw_out
@@ -411,10 +488,12 @@ def main():
                         f_out.write(json.dumps(record, ensure_ascii=False) + "\n")
                     continue
 
+                # 解析 bbox
                 with Image.open(img_path) as img:
                     w, h = img.size
                     parsed = extract_bboxes_from_model_output(raw_out, w, h)
 
+                # 保存结果
                 record = s["original_item"].copy()
                 record["model_raw_response"] = raw_out
                 record["parsed_bboxes"] = parsed
@@ -423,25 +502,13 @@ def main():
                 with open(save_path, "a", encoding="utf-8") as f_out:
                     f_out.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+                # 可选: 保存可视化
                 if vis_dir and parsed:
                     vis_path = os.path.join(vis_dir, f"{seq_name}_{s['frame_idx']}.jpg")
                     with Image.open(img_path) as img:
                         plot_bounding_boxes(img, parsed, vis_path)
 
-                # except Exception as e:
-                #     print(e)
-                #     err_rec = {
-                #         "image_path": img_path,
-                #         "dataset_name": dataset_name,
-                #         "seq_name": seq_name,
-                #         "frame_idx": s.get("frame_idx", "unknown"),
-                #         "error": str(e),
-                #         "traceback": traceback.format_exc(),
-                #     }
-                #     with open(err_path, "a", encoding="utf-8") as f_err:
-                #         f_err.write(json.dumps(err_rec, ensure_ascii=False) + "\n")
-
-    print("✅ 全部任务完成")
+    print("\n✅ 全部任务完成")
 
 
 if __name__ == "__main__":
