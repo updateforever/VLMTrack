@@ -14,3 +14,4 @@ scene_changes_clip/
 # Results (optional, uncomment if needed)
 # results/
 SOIBench/results/
+SOIBench/eval_results/

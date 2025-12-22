@@ -381,7 +381,7 @@ def main():
         overall_table = PrettyTable()
         overall_table.field_names = ["Model", "AUC", "OP@0.50", "OP@0.75", "Total Frames"]
         
-        for model in args.models:
+        for model in all_models:
             ious = np.array(all_dataset_results[model])
             if len(ious) == 0:
                 overall_table.add_row([model, 0.0, 0.0, 0.0, 0])
@@ -414,7 +414,7 @@ def main():
                 
             dataset_results = per_dataset_results[ds_name]
             
-            for model in args.models:
+            for model in all_models:
                 ious = np.array(dataset_results[model])
                 if len(ious) == 0:
                     detail_table.add_row([ds_name, model, 0.0, 0.0, 0.0, 0])
