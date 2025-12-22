@@ -69,7 +69,8 @@
             ],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}",
-                "DASHSCOPE_API_KEY": "sk-61547e720ce8407aa44f4511051903b0"
+                "DASHSCOPE_API_KEY": "sk-qRbXAVvchaiWDVqh4xHrHfc3OP65VUx1fI7kfBkv8FVYixut" 
+                // "sk-61547e720ce8407aa44f4511051903b0"
                 //  https://dashscope.aliyuncs.com/compatible-mode/v1
             },
             "justMyCode": false
