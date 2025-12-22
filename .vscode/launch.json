@@ -4,7 +4,6 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
         {
             "name": "Python 调试程序: 当前文件",
             "type": "debugpy",
@@ -12,7 +11,6 @@
             "program": "${file}",
             "console": "integratedTerminal"
         },
-
         {
             "name": "Qwen3VL Local - TNL2K",
             "type": "debugpy",
@@ -69,7 +67,7 @@
             ],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}",
-                "DASHSCOPE_API_KEY": "sk-qRbXAVvchaiWDVqh4xHrHfc3OP65VUx1fI7kfBkv8FVYixut" 
+                "DASHSCOPE_API_KEY": "sk-qRbXAVvchaiWDVqh4xHrHfc3OP65VUx1fI7kfBkv8FVYixut"
                 // "sk-61547e720ce8407aa44f4511051903b0"
                 //  https://dashscope.aliyuncs.com/compatible-mode/v1
             },
@@ -125,6 +123,111 @@
                 "0",
                 "--sequence",
                 "0"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "SOIBench: Grounding 推理 (本地模型)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/SOIBench/vlms/run_grounding_qwen3vl.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "local",
+                "--model_path",
+                "/path/to/Qwen2-VL-7B-Instruct",
+                "--lasot_jsonl",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot",
+                "--lasot_root",
+                "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
+                "--output_root",
+                "./SOIBench/results",
+                "--exp_tag",
+                "debug",
+                "--save_debug_vis"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "SOIBench: Grounding 推理 (API)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/SOIBench/vlms/run_grounding_qwen3vl.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "api",
+                "--api_model_name",
+                "qwen-vl-max",
+                "--api_key_env",
+                "sk-61547e720ce8407aa44f4511051903b0",
+                "--lasot_jsonl",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot",
+                "--lasot_root",
+                "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
+                "--output_root",
+                "./SOIBench/results",
+                "--exp_tag",
+                "api_debug"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "SOIBench: 评测结果",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/SOIBench/vlms/eval_results.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--pred_root",
+                "./SOIBench/results",
+                "--output_dir",
+                "./SOIBench/eval_results",
+                "--models",
+                "local_debug",
+                "api_debug",
+                "--datasets",
+                "lasot",
+                "--lasot_gt_root",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "SOIBench: 可视化结果",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/SOIBench/vlms/visualize_grounding.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset",
+                "lasot",
+                "--seq_name",
+                "airplane-1",
+                "--pred_file",
+                "./SOIBench/results/lasot/local_debug/airplane-1_pred.jsonl",
+                "--gt_file",
+                "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot/airplane-1_descriptions.jsonl",
+                "--image_root",
+                "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
+                "--output_dir",
+                "./SOIBench/vis_results",
+                "--save_video",
+                "--fps",
+                "30"
             ],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
