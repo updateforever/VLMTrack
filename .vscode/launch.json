@@ -65,7 +65,7 @@
                 "--threads",
                 "0",
                 "--debug",
-                "1"
+                "2"
             ],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}",
