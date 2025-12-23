@@ -49,7 +49,7 @@ class SOIBenchDataset(BaseDataset):
             "levels": [1, 2, 3, 4], 
             
             # 模式选择: 'realtime' | 'fixed' | 'hierarchical'
-            "persistence_mode": "hierarchical", 
+            "persistence_mode": "realtime",  # "hierarchical", 
             
             # 仅当 mode='fixed' 时生效
             "fixed_duration": 30, 
@@ -92,14 +92,6 @@ class SOIBenchDataset(BaseDataset):
                 print(f"  {key}: {value}")
         print("="*80)
         
-        # 消融实验警告
-        if self.soi_settings.get('use_original_text', False):
-            print("\n" + "⚠️ " * 27)
-            print("⚠️  " + " "*15 + "ABLATION MODE ACTIVE" + " "*15 + "  ⚠️")
-            print("⚠️  Using ORIGINAL TEXT - SOI annotations are DISABLED  ⚠️")
-            print("⚠️ " * 27 + "\n")
-        else:
-            print("\n✅ SOI Mode: Using hierarchical SOI annotations\n")
     
     def _generate_config_summary(self):
         """生成简洁的配置摘要"""
@@ -110,14 +102,14 @@ class SOIBenchDataset(BaseDataset):
         levels = self.soi_settings.get('levels', [1, 2, 3, 4])
         
         if mode == 'realtime':
-            duration_info = "Realtime (no persistence)"
+            duration_info = "Realtime 只在当前SOI帧有效，否则回退原文本"
         elif mode == 'fixed':
             fixed_dur = self.soi_settings.get('fixed_duration', 30)
-            duration_info = f"Fixed duration ({fixed_dur} frames for all levels)"
+            duration_info = f"Fixed duration ({fixed_dur} frames for all levels) SOI帧文本持续n帧"
         elif mode == 'hierarchical':
             level_durs = self.soi_settings.get('level_durations', {})
             dur_parts = [f"L{l}:{level_durs.get(l, 30)}f" for l in levels]
-            duration_info = f"Hierarchical ({', '.join(dur_parts)})"
+            duration_info = f"Hierarchical ({', '.join(dur_parts)}) SOI帧文本根据层级进行持续作用"
         else:
             duration_info = f"Unknown mode: {mode}"
         
