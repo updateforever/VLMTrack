@@ -178,16 +178,9 @@ def main():
                     })
                     continue
                 
-                # Skip 帧直接跳过
-                if status == "skip":
-                    results.append({
-                        **item,
-                        "model_response": "",
-                        "parsed_bboxes": []
-                    })
-                    continue
-                
                 # 构造 prompt
+                # 注意：即使是 skip 帧，VLM 也需要推理！
+                # skip 只是人类标注时跳过，算法需要对所有帧都预测
                 output_en = item.get("output-en", {}) or {}
                 desc_parts = []
                 for k in ["level1", "level2", "level3", "level4"]:

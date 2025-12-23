@@ -253,10 +253,9 @@ def load_and_fix_paths(jsonl_path: str, dataset_name: str, image_roots: dict):
                 continue
             item = json.loads(line)
 
-            # 跳过标记为 skip 的帧
-            if item.get("status") == "skip":
-                continue
-
+            # 注意：不要跳过 skip 帧！
+            # skip 只是人类标注时跳过，VLM 算法需要对所有帧都进行推理
+            
             # 提取描述文本
             output_en = item.get("output-en", {}) or {}
             desc_parts = []
@@ -267,7 +266,8 @@ def load_and_fix_paths(jsonl_path: str, dataset_name: str, image_roots: dict):
 
             full_desc = " ".join(desc_parts).strip()
             if not full_desc:
-                continue
+                # 如果没有描述，使用默认文本
+                full_desc = "the target object"
 
             # 修复图像路径
             rel = item.get("image_path", "")
