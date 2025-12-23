@@ -267,6 +267,7 @@ def load_and_fix_paths(jsonl_path: str, dataset_name: str, image_roots: dict):
             full_desc = " ".join(desc_parts).strip()
             if not full_desc:
                 # 如果没有描述，使用默认文本
+                print(f"  ⚠️  WARNING: 序列 {os.path.basename(jsonl_path)} 的帧 {item.get('frame_idx')} 缺少描述文本，使用默认 prompt")
                 full_desc = "the target object"
 
             # 修复图像路径

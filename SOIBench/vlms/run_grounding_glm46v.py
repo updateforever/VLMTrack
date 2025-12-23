@@ -190,6 +190,7 @@ def main():
                 
                 prompt = " ".join(desc_parts).strip()
                 if not prompt:
+                    print(f"  ⚠️  WARNING: 序列 {seq_name} 的帧 {frame_idx} 缺少描述文本，使用默认 prompt")
                     prompt = "the target object"
                 
                 # 推理
