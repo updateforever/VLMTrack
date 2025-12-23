@@ -182,10 +182,25 @@ def main():
                 # 注意：即使是 skip 帧，VLM 也需要推理！
                 # skip 只是人类标注时跳过，算法需要对所有帧都预测
                 output_en = item.get("output-en", {}) or {}
+                
+                # 构造分层描述，添加合适的标点
+                # Level 1, 2: 逗号结尾
+                # Level 3, 4: 句号结尾
                 desc_parts = []
-                for k in ["level1", "level2", "level3", "level4"]:
+                for idx, k in enumerate(["level1", "level2", "level3", "level4"], 1):
                     v = (output_en.get(k, "") or "").strip()
                     if v:
+                        # 转为小写
+                        v = v[0].lower() + v[1:] if len(v) > 0 else v
+                        
+                        # 添加标点
+                        if idx in [1, 2]:  # Level 1, 2: 逗号
+                            if not v.endswith(','):
+                                v = v + ','
+                        else:  # Level 3, 4: 句号
+                            if not v.endswith('.'):
+                                v = v + '.'
+                        
                         desc_parts.append(v)
                 
                 prompt = " ".join(desc_parts).strip()
