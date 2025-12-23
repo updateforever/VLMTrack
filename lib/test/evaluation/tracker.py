@@ -140,6 +140,15 @@ class Tracker:
             info = seq.frame_info(frame_num)
             info['previous_output'] = prev_output
 
+            # 把当前帧 (frame_num) 的 SOI 文本放入 info
+            if hasattr(seq, 'soi_info') and seq.soi_info is not None:
+                # 确保不越界 (通常 soi_info 长度等于总帧数)
+                if frame_num < len(seq.soi_info):
+                    current_soi = seq.soi_info[frame_num]
+                    # SUTRACK 在 track 里找 'text' 或 'nlp'
+                    if current_soi and 'text' in current_soi:
+                        info['soi_info'] = current_soi
+
             out = tracker.track(image, info)
             
             # 处理稀疏跟踪: 如果返回None则填充NaN (保持完整长度)
