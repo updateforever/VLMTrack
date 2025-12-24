@@ -108,15 +108,15 @@ def parameters(yaml_name: str = "qwen3vl_4b"):
     
     # =========== Debug设置 ===========
     # 0: 无输出, 1: 打印信息, 2: 保存可视化, 3: 实时显示
+    # 使用 test.py 的 --debug 参数控制,这里保持默认值
     params.debug = 0
     
     # =========== 关键帧跟踪 (Keyframe Tracking) ===========
     # 启用稀疏跟踪模式: 只在场景变化关键帧推理,非关键帧直接跳过
     # 结果只包含关键帧的bbox,评估时也只在关键帧上计算指标
-    params.use_keyframe = False
+    params.use_keyframe = True
     # 关键帧索引文件根目录 (包含scene_changes_clip结果)
-    # 例如: "D:/CODE/SUTrack/scene_changes_clip/tnl2k_scene_changes_clip"
-    params.keyframe_root = None
+    params.keyframe_root = "/home/member/data2/wyp/SOT/VLMTrack/scene_changes_clip/tnl2k_test_scene_changes_clip"
     
     params.save_all_boxes = False
     params.checkpoint = None
