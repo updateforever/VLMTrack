@@ -247,6 +247,77 @@ Output: {{"bbox_2d": [x1, y1, x2, y2]}} in 0-1000 scale"""
         
         return self._parse_memory(output)
     
+    def _save_visualization(self, prev_with_box: np.ndarray, search_img: np.ndarray, 
+                           pred_bbox_xywh: List[float], frame_id: int):
+        """保存记忆库可视化 (包含记忆内容)"""
+        if self.debug < 2 or self.vis_dir is None:
+            return
+        
+        result_img = self._draw_bbox_on_image(search_img, pred_bbox_xywh, color=(255, 0, 0), thickness=3)
+        
+        h1, w1 = prev_with_box.shape[:2]
+        h2, w2 = result_img.shape[:2]
+        target_h = max(h1, h2)
+        
+        def resize_to_height(img, target_h):
+            h, w = img.shape[:2]
+            if h != target_h:
+                return cv2.resize(img, (int(w * target_h / h), target_h))
+            return img
+        
+        prev_resized = resize_to_height(prev_with_box, target_h)
+        result_resized = resize_to_height(result_img, target_h)
+        
+        # 创建记忆显示区域
+        memory_width = 400
+        memory_img = np.ones((target_h, memory_width, 3), dtype=np.uint8) * 255
+        
+        y_offset = 30
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        
+        # 标题
+        cv2.putText(memory_img, "Memory Bank:", (10, y_offset), font, 0.7, (0, 0, 255), 2)
+        y_offset += 35
+        
+        # 外观
+        appearance = self.memory.get('appearance', '')[:80]
+        lines = [appearance[i:i+40] for i in range(0, len(appearance), 40)]
+        cv2.putText(memory_img, "Appearance:", (10, y_offset), font, 0.5, (0,0,0), 1)
+        y_offset += 25
+        for line in lines[:2]:
+            cv2.putText(memory_img, line, (15, y_offset), font, 0.4, (0,0,0), 1)
+            y_offset += 20
+        
+        # 运动
+        motion = self.memory.get('motion', '')[:60]
+        cv2.putText(memory_img, f"Motion: {motion}", (10, y_offset), font, 0.4, (0,0,0), 1)
+        y_offset += 25
+        
+        # 上下文
+        context = self.memory.get('context', '')[:60]
+        cv2.putText(memory_img, f"Context: {context}", (10, y_offset), font, 0.4, (0,0,0), 1)
+        y_offset += 35
+        
+        # 更新信息
+        last_update = self.memory.get('last_update', 0)
+        cv2.putText(memory_img, f"Last Update: Frame {last_update}", (10, y_offset), font, 0.4, (0,100,0), 1)
+        
+        # 拼接
+        combined = np.hstack([memory_img, prev_resized, result_resized])
+        
+        # 标注
+        cv2.putText(combined, f"Frame {frame_id}", (memory_width + 10, 30), font, 1, (0,255,0), 2)
+        cv2.putText(combined, "Prev (Blue)", (memory_width + 10, target_h - 10), font, 0.6, (255,0,0), 2)
+        cv2.putText(combined, "Current (Red)", (memory_width + prev_resized.shape[1] + 10, target_h - 10), font, 0.6, (0,0,255), 2)
+        
+        # 保存
+        vis_path = os.path.join(self.vis_dir, f"{self.seq_name}_{frame_id:04d}.jpg")
+        cv2.imwrite(vis_path, cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
+        
+        if self.debug >= 3:
+            cv2.imshow('Memory-Bank Tracking', cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
+            cv2.waitKey(1)
+    
     def _should_update_memory(self, frame_id: int) -> bool:
         """判断是否应该更新记忆"""
         # 关键帧模式: 只在关键帧更新
@@ -331,6 +402,9 @@ Output: {{"bbox_2d": [x1, y1, x2, y2]}} in 0-1000 scale"""
             if bbox_xyxy is not None:
                 pred_bbox = xyxy_to_xywh(bbox_xyxy)
                 self.state = pred_bbox
+                
+                # 可视化
+                self._save_visualization(prev_with_box, image, pred_bbox, self.frame_id)
                 
                 # 更新上一帧
                 self.prev_image = image.copy()

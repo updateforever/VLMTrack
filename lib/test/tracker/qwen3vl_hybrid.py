@@ -216,6 +216,55 @@ Output: {{"bbox_2d": [x1,y1,x2,y2]}} in 0-1000 scale"""
         
         return self._parse_memory(output)
     
+    def _save_visualization(self, prev_with_box: np.ndarray, search_img: np.ndarray, 
+                           pred_bbox_xywh: List[float], frame_id: int):
+        """保存混合模式可视化 (记忆+三图)"""
+        if self.debug < 2 or self.vis_dir is None:
+            return
+        
+        result_img = self._draw_bbox(search_img, pred_bbox_xywh, (255,0,0), 3)
+        h1, w1 = prev_with_box.shape[:2]
+        h2, w2 = result_img.shape[:2]
+        target_h = max(h1, h2)
+        
+        def resize(img, h):
+            return cv2.resize(img, (int(img.shape[1]*h/img.shape[0]), h)) if img.shape[0]!=h else img
+        
+        prev_resized = resize(prev_with_box, target_h)
+        result_resized = resize(result_img, target_h)
+        
+        # 记忆显示区域
+        memory_img = np.ones((target_h, 400, 3), dtype=np.uint8) * 255
+        y, font = 30, cv2.FONT_HERSHEY_SIMPLEX
+        
+        cv2.putText(memory_img, "Memory Bank:", (10,y), font, 0.7, (0,0,255), 2)
+        y += 35
+        
+        app = self.memory.get('appearance','')[:80]
+        cv2.putText(memory_img, "Appearance:", (10,y), font, 0.5, (0,0,0), 1)
+        y += 25
+        for line in [app[i:i+40] for i in range(0,len(app),40)][:2]:
+            cv2.putText(memory_img, line, (15,y), font, 0.4, (0,0,0), 1)
+            y += 20
+        
+        cv2.putText(memory_img, f"Motion: {self.memory.get('motion','')[:60]}", (10,y), font, 0.4, (0,0,0), 1)
+        y += 25
+        cv2.putText(memory_img, f"Context: {self.memory.get('context','')[:60]}", (10,y), font, 0.4, (0,0,0), 1)
+        y += 35
+        cv2.putText(memory_img, f"Update: Frame {self.memory.get('last_update',0)}", (10,y), font, 0.4, (0,100,0), 1)
+        
+        combined = np.hstack([memory_img, prev_resized, result_resized])
+        cv2.putText(combined, f"Frame {frame_id} [HYBRID]", (410,30), font, 1, (0,255,0), 2)
+        cv2.putText(combined, "Prev (Blue)", (410, target_h-10), font, 0.6, (255,0,0), 2)
+        cv2.putText(combined, "Current (Red)", (410+prev_resized.shape[1], target_h-10), font, 0.6, (0,0,255), 2)
+        
+        vis_path = os.path.join(self.vis_dir, f"{self.seq_name}_{frame_id:04d}.jpg")
+        cv2.imwrite(vis_path, cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
+        
+        if self.debug >= 3:
+            cv2.imshow('Hybrid Tracking', cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
+            cv2.waitKey(1)
+    
     def initialize(self, image, info: dict):
         """初始化"""
         self.frame_id = 0
@@ -286,6 +335,9 @@ Output: {{"bbox_2d": [x1,y1,x2,y2]}} in 0-1000 scale"""
             if bbox_xyxy:
                 pred_bbox = xyxy_to_xywh(bbox_xyxy)
                 self.state = pred_bbox
+                
+                # 可视化
+                self._save_visualization(prev_with_box, image, pred_bbox, self.frame_id)
                 
                 # 更新上一帧
                 self.prev_image = image.copy()
