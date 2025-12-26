@@ -39,8 +39,8 @@ MODEL_CONFIGS = {
     # API Models
     'qwen3vl_hybrid_api': {
         'mode': 'api',
-        'api_model': 'qwen3-vl-plus-2025-09-23',
-        'api_base_url': 'http://10.128.202.100:3010/v1',
+        'api_model': 'qwen3-vl-235b-a22b-instruct',
+        'api_base_url': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     },
     'qwen25vl_hybrid_api': {
         'mode': 'api',
