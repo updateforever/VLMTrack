@@ -1,0 +1,316 @@
+"""
+Qwen3VL Hybrid Tracker: Three-Image + Memory Bank
+终极方案: 结合三图跟踪和记忆库的优势
+
+跟踪范式:
+- Image 1: 初始帧 + 初始框 (绿色) - 固定视觉锚点
+- Image 2: 上一帧 + 预测框 (蓝色) - 短期运动
+- Image 3: 当前帧 - 待预测
+- Memory: 语义描述 - 文本锚点
+
+优势:
+- 双重锚定: 视觉(初始帧) + 语义(记忆库)
+- 运动连续: 上一帧提供短期线索
+- 自适应: 记忆库随目标变化更新
+- 最强鲁棒性: 多重约束减少漂移
+"""
+from lib.test.tracker.basetracker import BaseTracker
+from lib.test.evaluation.environment import env_settings
+import torch
+import cv2
+import numpy as np
+import re
+import json
+import os
+import time
+from pathlib import Path
+from PIL import Image
+from typing import List, Optional, Dict
+
+# 复用工具函数
+from lib.test.tracker.qwen3vl import (
+    extract_bbox_from_model_output,
+    xyxy_to_xywh,
+    numpy_to_base64,
+    qwen3vl_api_chat,
+    read_keyframe_indices
+)
+
+
+class QWEN3VL_Hybrid(BaseTracker):
+    """
+    混合跟踪模式: 三图 + 记忆库
+    
+    最强配置:
+    - 视觉锚点: 初始帧
+    - 运动线索: 上一帧
+    - 语义引导: 记忆库
+    """
+    
+    def __init__(self, params, dataset_name):
+        super(QWEN3VL_Hybrid, self).__init__(params)
+        self.params = params
+        self.dataset_name = dataset_name
+        
+        # 推理模式
+        self.mode = getattr(params, 'mode', 'api')
+        
+        if self.mode == 'local':
+            self._load_local_model()
+        else:
+            self._setup_api()
+        
+        # State
+        self.state = None
+        
+        # 三图状态
+        self.init_image = None
+        self.init_bbox = None
+        self.prev_image = None
+        self.prev_bbox = None
+        
+        # 记忆库
+        self.memory = {
+            "appearance": "",
+            "motion": "",
+            "context": "",
+            "last_update": 0
+        }
+        self.memory_update_interval = getattr(params, 'memory_update_interval', 10)
+        
+        self.language_description = None
+        self.frame_id = 0
+        self.seq_name = None
+        
+        # Keyframe
+        self.keyframe_indices = None
+        self.keyframe_results = {}
+        self.use_keyframe = getattr(params, 'use_keyframe', False)
+        self.keyframe_root = getattr(params, 'keyframe_root', None)
+        
+        # Debug
+        self.debug = getattr(params, 'debug', 0)
+        self.vis_dir = None
+    
+    def _load_local_model(self):
+        """加载本地模型"""
+        from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+        
+        model_name = getattr(self.params, 'model_name', 'Qwen/Qwen3-VL-4B-Instruct')
+        print(f"[Hybrid] Loading: {model_name}")
+        
+        try:
+            self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+                model_name, torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2", device_map="auto"
+            )
+        except:
+            self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+                model_name, torch_dtype=torch.bfloat16, device_map="auto"
+            )
+        
+        self.model.eval()
+        self.processor = AutoProcessor.from_pretrained(model_name)
+    
+    def _setup_api(self):
+        """配置API"""
+        self.api_model = getattr(self.params, 'api_model', 'qwen3-vl-plus-2025-09-23')
+        self.api_base_url = getattr(self.params, 'api_base_url', 'http://10.128.202.100:3010/v1')
+        self.api_key = getattr(self.params, 'api_key', os.environ.get('DASHSCOPE_API_KEY', ''))
+        print(f"[Hybrid] API: {self.api_model}")
+    
+    def _draw_bbox(self, image: np.ndarray, bbox: List[float], color=(0,255,0), thickness=3) -> np.ndarray:
+        """绘制bbox"""
+        img = image.copy()
+        x, y, w, h = [int(v) for v in bbox]
+        cv2.rectangle(img, (x, y), (x+w, y+h), color, thickness)
+        return img
+    
+    def _generate_memory_prompt(self) -> str:
+        """生成记忆prompt"""
+        return """Analyze the target object in the green box. Describe in JSON:
+{
+  "appearance": "color, shape, texture, distinctive features",
+  "motion": "current motion state",
+  "context": "surrounding objects, relative position"
+}
+Be specific. Output ONLY JSON."""
+    
+    def _tracking_prompt(self) -> str:
+        """三图+记忆库跟踪prompt"""
+        return f"""**Target Memory:**
+- Appearance: {self.memory['appearance']}
+- Motion: {self.memory['motion']}
+- Context: {self.memory['context']}
+
+**Images:**
+1. INITIAL FRAME (Green Box): Ground truth target at start
+2. PREVIOUS FRAME (Blue Box): Target location at t-1
+3. CURRENT FRAME: Find the target here
+
+**Task:** Locate the target matching:
+- Memory description (semantic anchor)
+- Initial appearance (Image 1, visual anchor)
+- Motion from previous frame (Image 2)
+
+Output: {{"bbox_2d": [x1,y1,x2,y2]}} in 0-1000 scale"""
+    
+    def _run_inference(self, images: List[np.ndarray], prompt: str) -> str:
+        """推理"""
+        if self.mode == 'api':
+            images_b64 = [numpy_to_base64(img) for img in images]
+            return qwen3vl_api_chat(
+                images_b64=images_b64, prompt=prompt,
+                model_name=self.api_model,
+                base_url=self.api_base_url,
+                api_key=self.api_key
+            )
+        else:
+            return self._run_local_inference(images, prompt)
+    
+    def _run_local_inference(self, images: List[np.ndarray], prompt: str) -> str:
+        """本地推理"""
+        images_pil = [Image.fromarray(img) for img in images]
+        content = [{"type": "image", "image": img} for img in images_pil]
+        content.append({"type": "text", "text": prompt})
+        
+        messages = [{"role": "user", "content": content}]
+        inputs = self.processor.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True,
+            return_dict=True, return_tensors="pt"
+        ).to(self.model.device)
+        
+        with torch.no_grad():
+            generated_ids = self.model.generate(**inputs, max_new_tokens=256, do_sample=False)
+        
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+        return self.processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True
+        )[0]
+    
+    def _parse_memory(self, text: str) -> Dict:
+        """解析记忆JSON"""
+        try:
+            text = re.sub(r'```json\s*', '', text)
+            text = re.sub(r'```\s*', '', text)
+            data = json.loads(text.strip())
+            return {
+                "appearance": data.get("appearance", ""),
+                "motion": data.get("motion", ""),
+                "context": data.get("context", ""),
+                "last_update": self.frame_id
+            }
+        except:
+            return self.memory
+    
+    def _generate_memory(self, image: np.ndarray, bbox: List[float]) -> Dict:
+        """生成记忆"""
+        img_with_box = self._draw_bbox(image, bbox, (0,255,0))
+        prompt = self._generate_memory_prompt()
+        output = self._run_inference([img_with_box], prompt)
+        
+        if self.debug >= 1:
+            print(f"[Hybrid] Memory: {output[:150]}...")
+        
+        return self._parse_memory(output)
+    
+    def initialize(self, image, info: dict):
+        """初始化"""
+        self.frame_id = 0
+        self.state = list(info['init_bbox'])
+        
+        # 三图状态
+        self.init_image = image.copy()
+        self.init_bbox = list(info['init_bbox'])
+        self.prev_image = image.copy()
+        self.prev_bbox = list(info['init_bbox'])
+        
+        self.seq_name = info.get('seq_name', None)
+        self.language_description = info.get('init_nlp', None) or "the target object"
+        
+        # 生成初始记忆
+        print(f"[Hybrid] Generating memory...")
+        self.memory = self._generate_memory(image, self.state)
+        
+        if self.debug >= 1:
+            print(f"[Hybrid] Appearance: {self.memory['appearance'][:80]}...")
+        
+        # 关键帧
+        if self.use_keyframe and self.keyframe_root:
+            self.keyframe_indices = read_keyframe_indices(self.keyframe_root, self.seq_name)
+            if self.keyframe_indices:
+                print(f"[Hybrid] Keyframes: {len(self.keyframe_indices)}")
+        
+        # 可视化
+        if self.debug >= 2:
+            env = env_settings()
+            self.vis_dir = os.path.join(env.results_path, 'qwen3vl_hybrid', 'vis', 
+                                       self.seq_name or 'unknown')
+            os.makedirs(self.vis_dir, exist_ok=True)
+        
+        mode_str = f"{self.mode} + three-image + memory"
+        if self.use_keyframe:
+            mode_str += " + keyframe"
+        print(f"[Hybrid] Init: {mode_str}")
+    
+    def track(self, image, info: dict = None):
+        """混合跟踪"""
+        self.frame_id += 1
+        H, W = image.shape[:2]
+        
+        # 稀疏跟踪
+        if self.use_keyframe and self.keyframe_indices:
+            if self.frame_id not in self.keyframe_indices:
+                if self.debug >= 1:
+                    print(f"[Hybrid] Frame {self.frame_id}: Skipped")
+                return None
+        
+        try:
+            # 准备三图
+            init_with_box = self._draw_bbox(self.init_image, self.init_bbox, (0,255,0))
+            prev_with_box = self._draw_bbox(self.prev_image, self.prev_bbox, (0,0,255))
+            
+            # 三图+记忆库推理
+            prompt = self._tracking_prompt()
+            output = self._run_inference([init_with_box, prev_with_box, image], prompt)
+            
+            if self.debug >= 1:
+                kf = "[KF]" if self.use_keyframe else ""
+                print(f"[Hybrid] Frame {self.frame_id}{kf}: {output[:80]}...")
+            
+            # 解析
+            bbox_xyxy = extract_bbox_from_model_output(output, W, H)
+            
+            if bbox_xyxy:
+                pred_bbox = xyxy_to_xywh(bbox_xyxy)
+                self.state = pred_bbox
+                
+                # 更新上一帧
+                self.prev_image = image.copy()
+                self.prev_bbox = pred_bbox
+                
+                # 更新记忆
+                if (self.frame_id - self.memory['last_update']) >= self.memory_update_interval:
+                    if self.debug >= 1:
+                        print(f"[Hybrid] Updating memory...")
+                    self.memory = self._generate_memory(image, pred_bbox)
+                
+                # 缓存
+                if self.use_keyframe:
+                    self.keyframe_results[self.frame_id] = pred_bbox
+            else:
+                if self.debug >= 1:
+                    print(f"[Hybrid] Frame {self.frame_id}: Parse failed")
+                self.state = [0,0,0,0]
+        
+        except Exception as e:
+            print(f"[Hybrid] Error {self.frame_id}: {e}")
+            self.state = [0,0,0,0]
+        
+        return {"target_bbox": self.state}
+
+
+def get_tracker_class():
+    return QWEN3VL_Hybrid
