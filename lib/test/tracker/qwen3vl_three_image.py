@@ -212,6 +212,56 @@ class QWEN3VL_ThreeImage(BaseTracker):
         
         return output_text
     
+    def _save_visualization(self, init_with_box: np.ndarray, prev_with_box: np.ndarray,
+                           search_img: np.ndarray, pred_bbox_xywh: List[float], frame_id: int):
+        """保存三图可视化"""
+        if self.debug < 2 or self.vis_dir is None:
+            return
+        
+        # 在搜索图上画预测框
+        result_img = self._draw_bbox_on_image(search_img, pred_bbox_xywh, color=(255, 0, 0), thickness=3)
+        
+        # 调整高度一致
+        h1, w1 = init_with_box.shape[:2]
+        h2, w2 = prev_with_box.shape[:2]
+        h3, w3 = result_img.shape[:2]
+        
+        target_h = max(h1, h2, h3)
+        
+        def resize_to_height(img, target_h):
+            h, w = img.shape[:2]
+            if h != target_h:
+                scale = target_h / h
+                new_w = int(w * scale)
+                return cv2.resize(img, (new_w, target_h))
+            return img
+        
+        init_resized = resize_to_height(init_with_box, target_h)
+        prev_resized = resize_to_height(prev_with_box, target_h)
+        result_resized = resize_to_height(result_img, target_h)
+        
+        # 水平拼接三图
+        combined = np.hstack([init_resized, prev_resized, result_resized])
+        
+        # 添加标注
+        cv2.putText(combined, f"Frame {frame_id}", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(combined, "Init (Green)", (10, target_h - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(combined, "Prev (Blue)", (init_resized.shape[1] + 10, target_h - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+        cv2.putText(combined, "Current (Red)", (init_resized.shape[1] + prev_resized.shape[1] + 10, target_h - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        
+        # 保存
+        vis_path = os.path.join(self.vis_dir, f"{self.seq_name}_{frame_id:04d}.jpg")
+        cv2.imwrite(vis_path, cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
+        
+        # 实时显示
+        if self.debug >= 3:
+            cv2.imshow('Three-Image Tracking', cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
+            cv2.waitKey(1)
+    
     def initialize(self, image, info: dict):
         """初始化跟踪器"""
         self.frame_id = 0
@@ -290,6 +340,9 @@ class QWEN3VL_ThreeImage(BaseTracker):
             if bbox_xyxy is not None:
                 pred_bbox = xyxy_to_xywh(bbox_xyxy)
                 self.state = pred_bbox
+                
+                # 可视化
+                self._save_visualization(init_with_box, prev_with_box, image, pred_bbox, self.frame_id)
                 
                 # 更新上一帧(短期记忆)
                 self.prev_image = image.copy()
