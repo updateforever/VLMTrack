@@ -196,10 +196,17 @@ Output: {{"bbox_2d": [x1,y1,x2,y2]}} in 0-1000 scale"""
             text = re.sub(r'```json\s*', '', text)
             text = re.sub(r'```\s*', '', text)
             data = json.loads(text.strip())
+            
+            # 将字典值转为字符串
+            def dict_to_str(val):
+                if isinstance(val, dict):
+                    return ', '.join(f"{k}: {v}" for k, v in val.items())
+                return str(val)
+            
             return {
-                "appearance": data.get("appearance", ""),
-                "motion": data.get("motion", ""),
-                "context": data.get("context", ""),
+                "appearance": dict_to_str(data.get("appearance", "")),
+                "motion": dict_to_str(data.get("motion", "")),
+                "context": dict_to_str(data.get("context", "")),
                 "last_update": self.frame_id
             }
         except:
