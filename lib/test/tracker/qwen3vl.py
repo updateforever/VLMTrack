@@ -411,12 +411,25 @@ class QWEN3VL(BaseTracker):
         return img
     
     def _build_tracking_prompt(self, description: str) -> str:
-        """构建跟踪prompt"""
+        """
+        构建跟踪prompt
+        结构: 核心指令 + 视觉参考 + 输出要求
+        """
         return (
-            f"The first image shows the template with the target object marked by a green bounding box. "
-            f"The target is: {description}. "
-            f"The second image is the current frame. "
-            f"Locate the same target in the second image, output its bbox coordinates using JSON format."
+            "# --- CORE TASK ---\n"
+            "Track the target object across frames. Determine if the target is still visible and locate it.\n\n"
+            
+            "# --- VISUAL REFERENCE ---\n"
+            f"Image 1 (Template): Target marked by GREEN box. Target is: {description}.\n"
+            "Image 2 (Current): Find the same target here.\n\n"
+            
+            "# --- OUTPUT REQUIREMENT ---\n"
+            "Output JSON format:\n"
+            "{\n"
+            '  "bbox": [x1, y1, x2, y2],      // 0-1000 scale. Output [0,0,0,0] if target is invisible/occluded.\n'
+            '  "evidence": "Briefly describe the visual features matched (e.g., \'Matched red color and shape\') and spatial logic (e.g., \'Moved slightly right\').",\n'
+            '  "confidence": 0.95             // A float between 0.0 (Lost) and 1.0 (Certain).\n'
+            "}\n"
         )
     
     def _run_inference(self, template_img: np.ndarray, search_img: np.ndarray, prompt: str) -> str:

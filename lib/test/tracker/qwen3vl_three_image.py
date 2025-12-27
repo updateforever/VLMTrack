@@ -135,23 +135,25 @@ class QWEN3VL_ThreeImage(BaseTracker):
     def _build_tracking_prompt(self, description: str) -> str:
         """
         构建三图跟踪prompt
-        输入: 3张图片
-          - 图1: 初始帧 + 绿框 (ground truth, 固定锐点)
-          - 图2: 上一帧 + 蓝框 (历史预测结果, 可能不准)
-          - 图3: 当前帧 (待预测)
+        结构: 核心指令 + 视觉参考 + 输出要求
         """
         return (
-            # 第一张图: 初始帧作为固定参考 (ground truth)
-            f"The first image shows the initial frame with the target object marked by a green bounding box (ground truth). "
-            f"The target is: {description}. "
-            # 第二张图: 上一帧的预测框,可能不准确
-            f"The second image shows the previous frame with the predicted target location marked by a blue bounding box (may not be accurate). "
-            # 第三张图: 当前帧需要定位
-            f"The third image is the current frame. "
-            # 任务: 以初始帧为准,参考上一帧运动
-            f"Locate the same target in the third image based on the ground truth (image 1), "
-            f"using the previous frame (image 2) only as motion reference. "
-            f"Output its bbox coordinates using JSON format."
+            "# --- CORE TASK ---\n"
+            "Track the target using initial appearance and motion cues. Determine if target is visible and locate it.\n\n"
+            
+            "# --- VISUAL REFERENCE ---\n"
+            f"Image 1 (Initial - GREEN box): Ground truth target. Target is: {description}.\n"
+            "Image 2 (Previous - BLUE box): Last prediction (may be inaccurate, use only for motion reference).\n"
+            "Image 3 (Current): Find the target here.\n\n"
+            
+            "# --- OUTPUT REQUIREMENT ---\n"
+            "Match the target based on: (1) Initial appearance (Image 1), (2) Motion trend (Image 2).\n"
+            "Output JSON format:\n"
+            "{\n"
+            '  "bbox": [x1, y1, x2, y2],      // 0-1000 scale. Output [0,0,0,0] if target is invisible/occluded.\n'
+            '  "evidence": "Describe matched features from Image 1 and motion from Image 2.",\n'
+            '  "confidence": 0.95             // Float between 0.0 (Lost) and 1.0 (Certain).\n'
+            "}\n"
         )
     
     def _run_inference(self, init_img: np.ndarray, prev_img: np.ndarray, 

@@ -141,43 +141,44 @@ class QWEN3VL_Memory(BaseTracker):
         return img
     
     def _generate_memory_prompt(self) -> str:
-        """
-        生成记忆库的prompt
-        输入: 1张图片(带绿框的目标)
-        输出: JSON格式的目标描述
-        """
+        """生成记忆库的prompt"""
         return (
-            # 要求VLM分析目标对象
-            "Analyze the target object marked by the green bounding box. "
-            # 输出JSON格式的详细描述
-            "Provide a detailed description in JSON format: "
-            '{"appearance": "color, shape, texture, features", '
-            '"motion": "current motion state", '
-            '"context": "surrounding objects and position"}. '
-            # 要求具体且能区分不同目标
-            "Be specific and focus on distinctive features. Output ONLY the JSON object."
+            "# --- TASK ---\n"
+            "Analyze the target object marked by the GREEN box.\n\n"
+            
+            "# --- OUTPUT ---\n"
+            "Provide a detailed description in JSON:\n"
+            "{\n"
+            '  "appearance": "color, shape, texture, distinctive features",\n'
+            '  "motion": "current motion state",\n'
+            '  "context": "surrounding objects and position"\n'
+            "}\n"
+            "Be specific. Output ONLY the JSON object.\n"
         )
     
     def _tracking_with_memory_prompt(self) -> str:
-        """
-        使用记忆库跟踪的prompt
-        输入: 2张图片
-          - 图1: 上一帧 + 蓝框 (历史预测结果, 可能不准)
-          - 图2: 当前帧
-        记忆: 目标的语义描述 (准确的锐点)
-        """
+        """使用记忆库跟踪的prompt"""
         return (
-            # 提供记忆库信息作为语义锐点
-            f"Target memory: appearance is {self.memory['appearance']}, "
-            f"motion is {self.memory['motion']}, "
-            f"context is {self.memory['context']}. "
-            # 第一张图: 上一帧的预测框,仅供运动参考
-            f"The first image shows the previous frame with the predicted target location marked by a blue bounding box (may not be accurate, use only for motion reference). "
-            # 第二张图: 当前帧需要定位
-            f"The second image is the current frame. "
-            # 任务: 以记忆为准,参考上一帧运动
-            f"Locate the target that matches the memory description in the second image, "
-            f"output its bbox coordinates using JSON format."
+            "# --- CORE TASK ---\n"
+            "Track the target using semantic memory and motion cues. Determine if target is visible and locate it.\n\n"
+            
+            "# --- SEMANTIC MEMORY ---\n"
+            f"Appearance: {self.memory['appearance']}\n"
+            f"Motion: {self.memory['motion']}\n"
+            f"Context: {self.memory['context']}\n\n"
+            
+            "# --- VISUAL REFERENCE ---\n"
+            "Image 1 (Previous - BLUE box): Last prediction (may be inaccurate, use only for motion reference).\n"
+            "Image 2 (Current): Find the target here.\n\n"
+            
+            "# --- OUTPUT REQUIREMENT ---\n"
+            "Match the target based on: (1) Semantic memory, (2) Motion from Image 1.\n"
+            "Output JSON format:\n"
+            "{\n"
+            '  "bbox": [x1, y1, x2, y2],      // 0-1000 scale. Output [0,0,0,0] if target is invisible/occluded.\n'
+            '  "evidence": "Describe matched features from memory and observed motion.",\n'
+            '  "confidence": 0.95             // Float between 0.0 (Lost) and 1.0 (Certain).\n'
+            "}\n"
         )
     
     def _run_inference(self, images: List[np.ndarray], prompt: str) -> str:

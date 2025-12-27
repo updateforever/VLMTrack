@@ -125,12 +125,17 @@ class QWEN3VL_Hybrid_V2(BaseTracker):
     def _generate_initial_memory_prompt(self) -> str:
         """生成初始记忆prompt"""
         return (
-            "Analyze the target object marked by the green bounding box. "
-            "Provide a detailed description in JSON format: "
-            '{"appearance": "color, shape, texture, features", '
-            '"motion": "current motion state", '
-            '"context": "surrounding objects and position"}. '
-            "Be specific. Output ONLY the JSON object."
+            "# --- TASK ---\n"
+            "Analyze the target object marked by the GREEN box.\n\n"
+            
+            "# --- OUTPUT ---\n"
+            "Provide a detailed description in JSON:\n"
+            "{\n"
+            '  "appearance": "color, shape, texture, distinctive features",\n'
+            '  "motion": "current motion state",\n'
+            '  "context": "surrounding objects and position"\n'
+            "}\n"
+            "Be specific. Output ONLY the JSON object.\n"
         )
     
     def _tracking_with_state_prompt(self) -> str:
@@ -140,22 +145,32 @@ class QWEN3VL_Hybrid_V2(BaseTracker):
         输出: bbox + state (一次VLM调用)
         """
         return (
-            # 提供记忆库作为语义锚点
-            f"Target memory: appearance is {self.memory['appearance']}, "
-            f"motion is {self.memory['motion']}, "
-            f"context is {self.memory['context']}. "
-            # 第一张图: 初始帧作为视觉锚点 (ground truth)
-            f"The first image shows the initial frame with the target marked by a green bounding box (ground truth). "
-            # 第二张图: 上一帧的预测框,仅供运动参考
-            f"The second image shows the previous frame with the predicted target location marked by a blue bounding box (may not be accurate, use only for motion reference). "
-            # 第三张图: 当前帧需要定位
-            f"The third image is the current frame. "
-            # 任务: 同时输出bbox和当前状态
-            f"Locate the target that matches both the memory description and the ground truth appearance (image 1), "
-            f"using the previous frame (image 2) only for motion reference. "
-            f"Output JSON format with TWO fields: "
-            f'"bbox": [x1, y1, x2, y2] in 0-1000 scale, '
-            f'"state": {{"appearance": "current appearance", "motion": "current motion", "context": "current context"}}.'
+            "# --- CORE TASK ---\n"
+            "Track the target using semantic memory, initial appearance, and motion cues. Determine if target is visible and locate it.\n\n"
+            
+            "# --- SEMANTIC MEMORY ---\n"
+            f"Appearance: {self.memory['appearance']}\n"
+            f"Motion: {self.memory['motion']}\n"
+            f"Context: {self.memory['context']}\n\n"
+            
+            "# --- VISUAL REFERENCE ---\n"
+            "Image 1 (Initial - GREEN box): Ground truth target.\n"
+            "Image 2 (Previous - BLUE box): Last prediction (may be inaccurate, use only for motion reference).\n"
+            "Image 3 (Current): Find the target here.\n\n"
+            
+            "# --- OUTPUT REQUIREMENT ---\n"
+            "Match the target based on: (1) Semantic memory, (2) Initial appearance (Image 1), (3) Motion from Image 2.\n"
+            "Output JSON format with TWO fields:\n"
+            "{\n"
+            '  "bbox": [x1, y1, x2, y2],      // 0-1000 scale. Output [0,0,0,0] if target is invisible/occluded.\n'
+            '  "evidence": "Describe matched features from memory, Image 1, and observed motion.",\n'
+            '  "confidence": 0.95,            // Float between 0.0 (Lost) and 1.0 (Certain).\n'
+            '  "state": {                     // Update current state for memory.\n'
+            '    "appearance": "current appearance description",\n'
+            '    "motion": "current motion state",\n'
+            '    "context": "current context"\n'
+            '  }\n'
+            "}\n"
         )
     
     def _run_inference(self, images: List[np.ndarray], prompt: str) -> str:
@@ -242,23 +257,36 @@ class QWEN3VL_Hybrid_V2(BaseTracker):
             bbox_xyxy = extract_bbox_from_model_output(text, W, H)
             return bbox_xyxy, None
     
-    def _save_visualization(self, prev_with_box: np.ndarray, search_img: np.ndarray, 
-                           pred_bbox_xywh: List[float], frame_id: int):
-        """保存混合V2可视化 (文本在下方padding)"""
+    def _save_visualization(self, init_with_box: np.ndarray, prev_with_box: np.ndarray, 
+                           search_img: np.ndarray, pred_bbox_xywh: List[float], frame_id: int):
+        """保存混合V2可视化 (三帧+文本在下方padding)"""
         if self.debug < 2 or self.vis_dir is None:
             return
+        
         result_img = self._draw_bbox(search_img, pred_bbox_xywh, (255,0,0), 3)
-        h1, w1 = prev_with_box.shape[:2]
-        h2, w2 = result_img.shape[:2]
-        target_h = max(h1, h2)
+        
+        # 调整三帧高度一致
+        h1, w1 = init_with_box.shape[:2]
+        h2, w2 = prev_with_box.shape[:2]
+        h3, w3 = result_img.shape[:2]
+        target_h = max(h1, h2, h3)
+        
         def resize(img, h):
             return cv2.resize(img, (int(img.shape[1]*h/img.shape[0]), h)) if img.shape[0]!=h else img
+        
+        init_resized = resize(init_with_box, target_h)
         prev_resized = resize(prev_with_box, target_h)
         result_resized = resize(result_img, target_h)
-        combined = np.hstack([prev_resized, result_resized])
+        
+        # 水平拼接三帧
+        combined = np.hstack([init_resized, prev_resized, result_resized])
+        
+        # 在下方添加padding用于显示记忆文本
         padding_height = 120
         h_combined, w_combined = combined.shape[:2]
         padding = np.ones((padding_height, w_combined, 3), dtype=np.uint8) * 255
+        
+        # 在padding上写记忆文本
         font = cv2.FONT_HERSHEY_SIMPLEX
         y = 25
         cv2.putText(padding, f"Frame {frame_id} - Hybrid V2 (3-Img + Memory):", (10,y), font, 0.6, (0,0,255), 2)
@@ -268,11 +296,19 @@ class QWEN3VL_Hybrid_V2(BaseTracker):
         cv2.putText(padding, f"Motion: {self.memory.get('motion','')[:80]}", (10,y), font, 0.4, (0,0,0), 1)
         y += 25
         cv2.putText(padding, f"Context: {self.memory.get('context','')[:80]}", (10,y), font, 0.4, (0,0,0), 1)
+        
+        # 垂直拼接: 图片 + padding
         final_img = np.vstack([combined, padding])
-        cv2.putText(final_img, "Prev (Blue)", (10, target_h-10), font, 0.6, (255,0,0), 2)
-        cv2.putText(final_img, "Current (Red)", (prev_resized.shape[1]+10, target_h-10), font, 0.6, (0,0,255), 2)
+        
+        # 添加图片标注
+        cv2.putText(final_img, "Init (Green)", (10, target_h-10), font, 0.6, (0,255,0), 2)
+        cv2.putText(final_img, "Prev (Blue)", (init_resized.shape[1]+10, target_h-10), font, 0.6, (255,0,0), 2)
+        cv2.putText(final_img, "Current (Red)", (init_resized.shape[1]+prev_resized.shape[1]+10, target_h-10), font, 0.6, (0,0,255), 2)
+        
+        # 保存
         vis_path = os.path.join(self.vis_dir, f"{self.seq_name}_{frame_id:04d}.jpg")
         cv2.imwrite(vis_path, cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR))
+        
         if self.debug >= 3:
             cv2.imshow('Hybrid-V2', cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR))
             cv2.waitKey(1)
@@ -374,8 +410,8 @@ class QWEN3VL_Hybrid_V2(BaseTracker):
                 pred_bbox = xyxy_to_xywh(bbox_xyxy)
                 self.state = pred_bbox
                 
-                # 可视化
-                self._save_visualization(prev_with_box, image, pred_bbox, self.frame_id)
+                # 可视化 (三帧)
+                self._save_visualization(init_with_box, prev_with_box, image, pred_bbox, self.frame_id)
                 
                 # V2核心: 如果VLM输出了state,直接更新记忆库
                 if new_state is not None:
