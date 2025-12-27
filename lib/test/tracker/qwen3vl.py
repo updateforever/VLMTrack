@@ -154,16 +154,26 @@ def numpy_to_base64(image: np.ndarray) -> str:
 
 # ============== Keyframe Tracking Utils ==============
 
-def read_keyframe_indices(jsonl_root: str, seq_name: str) -> Optional[Set[int]]:
+def read_keyframe_indices(jsonl_root: str, seq_name: str, sample_interval: int = 10) -> Optional[Set[int]]:
     """
-    读取关键帧索引 (场景变化检测结果)
+    读取关键帧索引 + 在场景变化帧之间补充采样帧
     
-    支持路径:
-    - jsonl_root/category/seq_name.jsonl
-    - jsonl_root/seq_name.jsonl
-    - jsonl_root/category/seq_name_done.jsonl
+    Args:
+        jsonl_root: scene_changes_clip结果根目录
+        seq_name: 序列名称
+        sample_interval: 在场景变化帧之间的采样间隔 (默认10帧)
+                        设为0或None则只使用场景变化帧
     
-    格式: {"changes": [0, 104, 172, ...], "total_frames": 543}
+    Returns:
+        关键帧索引集合 (场景变化帧 + 间隔补充帧)
+    
+    示例:
+        场景变化帧: [0, 104, 260, 543]  (必须保留)
+        sample_interval=10:
+        → 在0-104之间: [10, 20, 30, ..., 90]
+        → 在104-260之间: [110, 120, ..., 250]  
+        → 在260-543之间: [270, 280, ..., 540]
+        → 最终: [0, 10, 20, ..., 90, 104, 110, ..., 250, 260, ..., 540, 543]
     """
     if not jsonl_root:
         return None
@@ -195,17 +205,45 @@ def read_keyframe_indices(jsonl_root: str, seq_name: str) -> Optional[Set[int]]:
             
             data = json.loads(line)
             
-            # 支持多种格式
+            # 读取场景变化帧 (必须保留)
+            scene_changes = None
             if isinstance(data, list):
-                return set(data)
-            
-            if isinstance(data, dict):
+                scene_changes = set(data)
+            elif isinstance(data, dict):
                 if "changes" in data:
-                    return set(data["changes"])
-                if "keyframes" in data:
-                    return set(data["keyframes"])
+                    scene_changes = set(data["changes"])
+                elif "keyframes" in data:
+                    scene_changes = set(data["keyframes"])
             
-            return None
+            if scene_changes is None:
+                return None
+            
+            # 如果不需要间隔采样,直接返回场景变化帧
+            if sample_interval is None or sample_interval <= 0:
+                return scene_changes
+            
+            # 获取总帧数
+            total_frames = data.get('total_frames', max(scene_changes) + 1 if scene_changes else 100)
+            
+            # 在场景变化帧之间补充采样帧
+            scene_changes_sorted = sorted(scene_changes)
+            all_keyframes = set(scene_changes)  # 先保留所有场景变化帧
+            
+            # 在每两个场景变化帧之间补充采样
+            for i in range(len(scene_changes_sorted)):
+                start = scene_changes_sorted[i]
+                end = scene_changes_sorted[i+1] if i+1 < len(scene_changes_sorted) else total_frames
+                
+                # 在start和end之间按间隔采样 (不包括start和end,它们已经在scene_changes中)
+                for frame in range(start + sample_interval, end, sample_interval):
+                    all_keyframes.add(frame)
+            
+            num_added = len(all_keyframes) - len(scene_changes)
+            print(f"[Keyframe] {seq_name}: Scene changes={len(scene_changes)}, "
+                  f"Added samples(every {sample_interval})={num_added}, "
+                  f"Total={len(all_keyframes)}/{total_frames} ({len(all_keyframes)/total_frames*100:.1f}%)")
+            
+            return all_keyframes
     except Exception as e:
         print(f"[Keyframe] Error reading {target}: {e}")
         return None
@@ -480,7 +518,8 @@ class QWEN3VL(BaseTracker):
         
         # 关键帧跟踪初始化
         if self.use_keyframe and self.keyframe_root:
-            self.keyframe_indices = read_keyframe_indices(self.keyframe_root, self.seq_name)
+            sample_interval = getattr(self.params, 'sample_interval', 10)
+            self.keyframe_indices = read_keyframe_indices(self.keyframe_root, self.seq_name, sample_interval)
             if self.keyframe_indices:
                 print(f"[Qwen3VL] Keyframe mode: {len(self.keyframe_indices)} keyframes")
             else:

@@ -114,6 +114,9 @@ def parameters(yaml_name: str = "qwen3vl_4b"):
     params.use_keyframe = True
     # 关键帧索引文件根目录 (包含scene_changes_clip结果)
     params.keyframe_root = "/home/member/data2/wyp/SOT/VLMTrack/scene_changes_clip/tnl2k_test_scene_changes_clip"
+    # 间隔采样: 在场景变化帧之间每N帧补充一帧,让序列更流畅
+    # 场景变化帧: [0, 104, 260] → 补充采样(每10帧) → [0, 10, 20, ..., 90, 104, 110, ..., 250, 260]
+    params.sample_interval = 10  # 设为0则只使用场景变化帧
     
     params.save_all_boxes = False
     params.checkpoint = None

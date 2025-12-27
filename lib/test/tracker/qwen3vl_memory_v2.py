@@ -246,6 +246,41 @@ class QWEN3VL_Memory_V2(BaseTracker):
             bbox_xyxy = extract_bbox_from_model_output(text, W, H)
             return bbox_xyxy, None
     
+    def _save_visualization(self, prev_with_box: np.ndarray, search_img: np.ndarray, 
+                           pred_bbox_xywh: List[float], frame_id: int):
+        """保存记忆库V2可视化 (文本在下方padding)"""
+        if self.debug < 2 or self.vis_dir is None:
+            return
+        result_img = self._draw_bbox(search_img, pred_bbox_xywh, (255,0,0), 3)
+        h1, w1 = prev_with_box.shape[:2]
+        h2, w2 = result_img.shape[:2]
+        target_h = max(h1, h2)
+        def resize(img, h):
+            return cv2.resize(img, (int(img.shape[1]*h/img.shape[0]), h)) if img.shape[0]!=h else img
+        prev_resized = resize(prev_with_box, target_h)
+        result_resized = resize(result_img, target_h)
+        combined = np.hstack([prev_resized, result_resized])
+        padding_height = 120
+        h_combined, w_combined = combined.shape[:2]
+        padding = np.ones((padding_height, w_combined, 3), dtype=np.uint8) * 255
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        y = 25
+        cv2.putText(padding, f"Frame {frame_id} - Memory V2:", (10,y), font, 0.6, (0,0,255), 2)
+        y += 30
+        cv2.putText(padding, f"App: {self.memory.get('appearance','')[:100]}", (10,y), font, 0.4, (0,0,0), 1)
+        y += 25
+        cv2.putText(padding, f"Motion: {self.memory.get('motion','')[:80]}", (10,y), font, 0.4, (0,0,0), 1)
+        y += 25
+        cv2.putText(padding, f"Context: {self.memory.get('context','')[:80]}", (10,y), font, 0.4, (0,0,0), 1)
+        final_img = np.vstack([combined, padding])
+        cv2.putText(final_img, "Prev (Blue)", (10, target_h-10), font, 0.6, (255,0,0), 2)
+        cv2.putText(final_img, "Current (Red)", (prev_resized.shape[1]+10, target_h-10), font, 0.6, (0,0,255), 2)
+        vis_path = os.path.join(self.vis_dir, f"{self.seq_name}_{frame_id:04d}.jpg")
+        cv2.imwrite(vis_path, cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR))
+        if self.debug >= 3:
+            cv2.imshow('Memory-V2', cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR))
+            cv2.waitKey(1)
+    
     def initialize(self, image, info: dict):
         """初始化"""
         self.frame_id = 0
@@ -332,6 +367,9 @@ class QWEN3VL_Memory_V2(BaseTracker):
             if bbox_xyxy is not None:
                 pred_bbox = xyxy_to_xywh(bbox_xyxy)
                 self.state = pred_bbox
+                
+                # 可视化
+                self._save_visualization(prev_with_box, image, pred_bbox, self.frame_id)
                 
                 # V2核心: 如果VLM输出了state,直接更新记忆库
                 if new_state is not None:
