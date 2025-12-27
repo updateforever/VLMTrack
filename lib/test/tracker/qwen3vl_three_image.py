@@ -133,29 +133,26 @@ class QWEN3VL_ThreeImage(BaseTracker):
         return img
     
     def _build_tracking_prompt(self, description: str) -> str:
-        """构建三图跟踪prompt"""
-        return f"""You are tracking an object across video frames.
-
-**Reference Images:**
-1. INITIAL FRAME (Green Box): Shows the target at the beginning
-   - Target: {description}
-   - This is the GROUND TRUTH reference - the target you must find
-
-2. PREVIOUS FRAME (Blue Box): Shows where the target was in the last frame
-   - Provides motion continuity and recent appearance
-   
-3. CURRENT FRAME: Your task is to find the target here
-
-**Instructions:**
-- Locate the SAME target shown in Image 1 (green box)
-- Use Image 2 (blue box) to understand recent motion
-- The target in current frame should match BOTH:
-  * Initial appearance (Image 1)
-  * Motion trajectory (from Image 2)
-
-**Output Format:**
-{{"bbox_2d": [x1, y1, x2, y2]}} in 0-1000 scale
-"""
+        """
+        构建三图跟踪prompt
+        输入: 3张图片
+          - 图1: 初始帧 + 绿框 (ground truth, 固定锐点)
+          - 图2: 上一帧 + 蓝框 (历史预测结果, 可能不准)
+          - 图3: 当前帧 (待预测)
+        """
+        return (
+            # 第一张图: 初始帧作为固定参考 (ground truth)
+            f"The first image shows the initial frame with the target object marked by a green bounding box (ground truth). "
+            f"The target is: {description}. "
+            # 第二张图: 上一帧的预测框,可能不准确
+            f"The second image shows the previous frame with the predicted target location marked by a blue bounding box (may not be accurate). "
+            # 第三张图: 当前帧需要定位
+            f"The third image is the current frame. "
+            # 任务: 以初始帧为准,参考上一帧运动
+            f"Locate the same target in the third image based on the ground truth (image 1), "
+            f"using the previous frame (image 2) only as motion reference. "
+            f"Output its bbox coordinates using JSON format."
+        )
     
     def _run_inference(self, init_img: np.ndarray, prev_img: np.ndarray, 
                       current_img: np.ndarray, prompt: str) -> str:
