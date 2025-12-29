@@ -264,16 +264,17 @@ def load_and_fix_paths(jsonl_path: str, dataset_name: str, image_roots: dict):
             for idx, k in enumerate(["level1", "level2", "level3", "level4"], 1):
                 v = (output_en.get(k, "") or "").strip()
                 if v:
+                    # 移除末尾的标点符号
+                    v = v.rstrip('.,;:!?')
+                    
                     # 转为小写
                     v = v[0].lower() + v[1:] if len(v) > 0 else v
                     
                     # 添加标点
                     if idx in [1, 2]:  # Level 1, 2: 逗号
-                        if not v.endswith(','):
-                            v = v + ','
+                        v = v + ','
                     else:  # Level 3, 4: 句号
-                        if not v.endswith('.'):
-                            v = v + '.'
+                        v = v + '.'
                     
                     desc_parts.append(v)
 

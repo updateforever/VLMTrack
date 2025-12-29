@@ -12,6 +12,41 @@ from tqdm import tqdm
 from PIL import Image
 
 from glm46v_infer import GLM46VLocalEngine, GLM46VAPIEngine, parse_glm46v_bbox
+import cv2
+import numpy as np
+
+
+def draw_bbox_on_image(image_path, gt_box, pred_boxes, output_path):
+    """
+    在图像上绘制 GT 和预测的 bbox
+    
+    参数:
+        image_path: 图像路径
+        gt_box: GT bbox [[x1, y1], [x2, y2]]
+        pred_boxes: 预测 bbox 列表 [[x1, y1, x2, y2], ...]
+        output_path: 输出路径
+    """
+    # 读取图像
+    img = cv2.imread(image_path)
+    if img is None:
+        return
+    
+    # 绘制 GT (绿色)
+    if gt_box and len(gt_box) == 2:
+        x1, y1 = int(gt_box[0][0]), int(gt_box[0][1])
+        x2, y2 = int(gt_box[1][0]), int(gt_box[1][1])
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(img, 'GT', (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    
+    # 绘制预测 (红色)
+    for idx, pred_box in enumerate(pred_boxes):
+        if len(pred_box) == 4:
+            x1, y1, x2, y2 = map(int, pred_box)
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(img, f'Pred{idx+1}', (x1, y2+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    
+    # 保存
+    cv2.imwrite(output_path, img)
 
 
 def main():
@@ -66,6 +101,8 @@ def main():
                         help="输出根目录")
     parser.add_argument("--exp_tag", type=str, default="glm46v",
                         help="实验标签")
+    parser.add_argument("--save_debug_vis", action="store_true",
+                        help="是否保存调试可视化图像")
     
     args = parser.parse_args()
     
@@ -127,6 +164,12 @@ def main():
             seq_name = jsonl_file.replace('_descriptions.jsonl', '')
             jsonl_path = os.path.join(jsonl_dir, jsonl_file)
             output_path = os.path.join(output_dir, f"{seq_name}_pred.jsonl")
+            
+            # 可视化目录
+            vis_dir = None
+            if args.save_debug_vis:
+                vis_dir = os.path.join(output_dir, f"{seq_name}_vis")
+                os.makedirs(vis_dir, exist_ok=True)
             
             # 如果已经处理过，跳过
             if os.path.exists(output_path):
@@ -190,16 +233,17 @@ def main():
                 for idx, k in enumerate(["level1", "level2", "level3", "level4"], 1):
                     v = (output_en.get(k, "") or "").strip()
                     if v:
+                        # 移除末尾的标点符号
+                        v = v.rstrip('.,;:!?')
+                        
                         # 转为小写
                         v = v[0].lower() + v[1:] if len(v) > 0 else v
                         
                         # 添加标点
                         if idx in [1, 2]:  # Level 1, 2: 逗号
-                            if not v.endswith(','):
-                                v = v + ','
+                            v = v + ','
                         else:  # Level 3, 4: 句号
-                            if not v.endswith('.'):
-                                v = v + '.'
+                            v = v + '.'
                         
                         desc_parts.append(v)
                 
@@ -221,6 +265,12 @@ def main():
                         "model_response": response,
                         "parsed_bboxes": bboxes
                     })
+                    
+                    # 保存可视化
+                    if vis_dir:
+                        vis_path = os.path.join(vis_dir, f"{frame_idx:08d}.jpg")
+                        gt_box = item.get("gt_box")
+                        draw_bbox_on_image(full_image_path, gt_box, bboxes, vis_path)
                     
                 except Exception as e:
                     print(f"  ❌ 推理失败 ({seq_name}, frame {frame_idx}): {e}")
