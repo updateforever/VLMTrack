@@ -446,9 +446,10 @@ def main():
             vis_dir = os.path.join(out_dir, "vis_debug")
             os.makedirs(vis_dir, exist_ok=True)
 
-        jsonl_files = sorted(glob.glob(os.path.join(jsonl_dir, "*.jsonl")))
+        # 只匹配 _descriptions.jsonl 文件，避免匹配到 _pred.jsonl 等其他文件
+        jsonl_files = sorted([f for f in os.listdir(jsonl_dir) if f.endswith('_descriptions.jsonl')])
         if not jsonl_files:
-            print(f"⚠️  目录为空: {jsonl_dir}")
+            print(f"⚠️  目录为空或没有 _descriptions.jsonl 文件: {jsonl_dir}")
             continue
 
         print(f"\n📂 处理数据集: {dataset_name} ({len(jsonl_files)} 个序列)")
@@ -459,7 +460,8 @@ def main():
 
             # 断点续跑: 检查已处理的行数
             processed = _count_lines(save_path)
-            samples = load_and_fix_paths(jsonl_file, dataset_name, image_roots)
+            jsonl_path = os.path.join(jsonl_dir, jsonl_file)
+            samples = load_and_fix_paths(jsonl_path, dataset_name, image_roots)
 
             if processed >= len(samples):
                 continue

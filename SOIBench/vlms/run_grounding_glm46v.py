@@ -157,8 +157,8 @@ def main():
         print(f"输出目录: {output_dir}")
         print(f"{'='*60}\n")
         
-        # 获取所有 JSONL 文件
-        jsonl_files = [f for f in os.listdir(jsonl_dir) if f.endswith('_descriptions.jsonl')]
+        # 获取所有 JSONL 文件并排序
+        jsonl_files = sorted([f for f in os.listdir(jsonl_dir) if f.endswith('_descriptions.jsonl')])
         
         for jsonl_file in tqdm(jsonl_files, desc=f"处理 {dataset_name}"):
             seq_name = jsonl_file.replace('_descriptions.jsonl', '')
