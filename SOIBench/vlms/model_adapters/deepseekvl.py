@@ -51,7 +51,7 @@ class DeepSeekVLLocalEngine:
         conversation = [
             {
                 "role": "<|User|>",
-                "content": f"<image>\n<|ref|>{prompt}<|/ref|>.",
+                "content": f"<image>\n{prompt}",
                 "images": [image_path],
             },
             {"role": "<|Assistant|>", "content": ""},
@@ -128,7 +128,7 @@ class DeepSeekVLAPIEngine:
                 "role": "user",
                 "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
-                    {"type": "text", "text": f"<|ref|>{prompt}<|/ref|>."}
+                    {"type": "text", "text": prompt}
                 ]
             }
         ]
@@ -232,6 +232,7 @@ class DeepSeekVLAdapter(ModelAdapter):
     def build_prompt(self, desc_parts: List[str]) -> str:
         """构造 DeepSeek-VL2 的 prompt"""
         description = " ".join(desc_parts).strip()
+        # DeepSeek-VL2 需要 <|ref|> 标记进行 grounding
         return f"<|ref|>{description}<|/ref|>."
     
     def parse_response(self, response: str, img_width: int, img_height: int) -> List[List[float]]:

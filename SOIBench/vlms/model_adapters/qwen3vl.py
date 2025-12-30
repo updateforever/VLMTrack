@@ -262,7 +262,12 @@ class Qwen3VLAdapter(ModelAdapter):
     
     def build_prompt(self, desc_parts: List[str]) -> str:
         """构造 Qwen3VL 的 prompt"""
-        return " ".join(desc_parts).strip()
+        description = " ".join(desc_parts).strip()
+        return (
+            "You are a visual grounding model. Given an image and a target description, output the target bounding box.\n"
+            f"Target description: {description}\n"
+            "Locate the description target, output its bbox coordinates using JSON format."
+        )
     
     def parse_response(self, response: str, img_width: int, img_height: int) -> List[List[float]]:
         """解析 Qwen3VL 的输出"""
