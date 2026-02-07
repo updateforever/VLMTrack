@@ -530,14 +530,23 @@ class QWEN3VL(BaseTracker):
             self.language_description = "the target object marked in green box"
         
         # 关键帧跟踪初始化
-        if self.use_keyframe and self.keyframe_root:
-            sample_interval = getattr(self.params, 'sample_interval', 10)
-            self.keyframe_indices = read_keyframe_indices(self.keyframe_root, self.seq_name, sample_interval)
-            if self.keyframe_indices:
-                print(f"[Qwen3VL] Keyframe mode: {len(self.keyframe_indices)} keyframes")
+        if self.use_keyframe:
+            # 根据数据集名称选择对应的关键帧路径
+            keyframe_root_dict = getattr(self.params, 'keyframe_root_dict', {})
+            self.keyframe_root = keyframe_root_dict.get(self.dataset_name, None)
+            
+            if self.keyframe_root:
+                sample_interval = getattr(self.params, 'sample_interval', 10)
+                self.keyframe_indices = read_keyframe_indices(self.keyframe_root, self.seq_name, sample_interval)
+                if self.keyframe_indices:
+                    print(f"[Qwen3VL] Keyframe mode: {len(self.keyframe_indices)} keyframes for {self.dataset_name}")
+                else:
+                    print(f"[Qwen3VL] Keyframe file not found for {self.seq_name}, using full tracking")
+                    self.use_keyframe = False
             else:
-                print(f"[Qwen3VL] Keyframe file not found, using full tracking")
+                print(f"[Qwen3VL] No keyframe path configured for dataset '{self.dataset_name}', using full tracking")
                 self.use_keyframe = False
+        
         
         # 设置可视化目录 (与results路径一致)
         if self.debug >= 2:

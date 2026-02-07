@@ -36,5 +36,14 @@ def local_env_settings():
     settings.videocube_path = '/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/MGIT-Test'
     settings.lasotlang_path = '/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark'
 
+    # =========== Keyframe paths for different datasets ===========
+    # 场景变化检测结果路径,用于稀疏跟踪
+    settings.keyframe_root = {
+        'tnl2k': '/home/member/data2/wyp/SOT/VLMTrack/scene_changes_clip/tnl2k_test_scene_changes_clip',
+        'lasot': '/home/member/data2/wyp/SOT/VLMTrack/scene_changes_clip/lasot_test_scene_changes_clip',
+        'got10k': '/home/member/data2/wyp/SOT/VLMTrack/scene_changes_clip/got10k_test_scene_changes_clip',
+        # 添加其他数据集的路径...
+    }
+
     return settings
 

@@ -108,12 +108,13 @@ def parameters(yaml_name: str = "qwen3vl_4b"):
     # 使用 test.py 的 --debug 参数控制,这里保持默认值
     params.debug = 0
     
+    
     # =========== 关键帧跟踪 (Keyframe Tracking) ===========
     # 启用稀疏跟踪模式: 只在场景变化关键帧推理,非关键帧直接跳过
     # 结果只包含关键帧的bbox,评估时也只在关键帧上计算指标
     params.use_keyframe = True
-    # 关键帧索引文件根目录 (包含scene_changes_clip结果)
-    params.keyframe_root = "/home/member/data2/wyp/SOT/VLMTrack/scene_changes_clip/tnl2k_test_scene_changes_clip"
+    # 关键帧索引文件根目录 (从local.py获取,根据数据集自动选择)
+    params.keyframe_root_dict = getattr(env, 'keyframe_root', {})
     # 间隔采样: 在场景变化帧之间每N帧补充一帧,让序列更流畅
     # 场景变化帧: [0, 104, 260] → 补充采样(每10帧) → [0, 10, 20, ..., 90, 104, 110, ..., 250, 260]
     params.sample_interval = 10  # 设为0则只使用场景变化帧

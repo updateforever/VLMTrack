@@ -94,9 +94,12 @@ def parameters(yaml_name: str = "qwen3vl_memory_api"):
     # =========== Debug设置 ===========
     params.debug = 0
     
-    # =========== 关键帧跟踪 ===========
+    # =========== 关键帧跟踪 (Keyframe Tracking) ===========
     params.use_keyframe = True
-    params.keyframe_root = "/home/member/data2/wyp/SOT/VLMTrack/scene_changes_clip/tnl2k_test_scene_changes_clip"
+    # 关键帧索引文件根目录 (从local.py获取，根据数据集自动选择)
+    env = env_settings()
+    params.keyframe_root_dict = getattr(env, 'keyframe_root', {})
+    params.sample_interval = 10
     
     params.save_all_boxes = False
     params.checkpoint = None
