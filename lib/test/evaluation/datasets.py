@@ -25,6 +25,13 @@ dataset_dict = dict(
     lasot_lang=DatasetInfo(module=pt % "lasotlang", class_name="LaSOTLangDataset", kwargs=dict()),
     soibench = DatasetInfo(module=pt % "soibench", class_name="SOIBenchDataset", kwargs=dict()), #
 
+    # add for MGIT
+    videocube_test=DatasetInfo(module=pt % "videocube", class_name="VideoCubeDataset", kwargs=dict(split='test')),
+    videocube_val=DatasetInfo(module=pt % "videocube", class_name="VideoCubeDataset", kwargs=dict(split='val')),
+    videocube_val_tiny=DatasetInfo(module=pt % "videocube", class_name="VideoCubeDataset", kwargs=dict(split='val', version='tiny')),
+    videocube_test_tiny=DatasetInfo(module=pt % "videocube", class_name="VideoCubeDataset", kwargs=dict(split='test', version='tiny')),
+
+
 )
 
 

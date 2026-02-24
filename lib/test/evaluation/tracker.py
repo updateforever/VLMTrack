@@ -10,6 +10,9 @@ from lib.utils.lmdb_utils import decode_img
 from pathlib import Path
 import numpy as np
 
+# 关键帧索引加载模块（用于VLM稀疏推理）
+from lib.test.evaluation.keyframe_loader import load_keyframe_indices
+
 
 def trackerlist(name: str, parameter_name: str, dataset_name: str, run_ids = None, display_name: str = None,
                 result_only=False):
@@ -132,6 +135,31 @@ class Tracker:
 
         _store_outputs(out, init_default)
 
+        # ========== 关键帧索引加载（用于VLM稀疏推理）==========
+        keyframe_indices = None
+        use_keyframe = getattr(tracker.params, 'use_keyframe', False)
+        
+        if use_keyframe:
+            # 从params获取索引文件根目录
+            keyframe_root = getattr(tracker.params, 'keyframe_root', None)
+            
+            if keyframe_root:
+                # 根据数据集名和序列名加载关键帧索引
+                keyframe_indices = load_keyframe_indices(
+                    dataset_name=self.dataset_name,
+                    seq_name=seq.name,
+                    keyframe_config=keyframe_root  # 修改参数名
+                )
+                
+                if keyframe_indices:
+                    print(f"[Tracker] Loaded {len(keyframe_indices)} keyframes for {seq.name} "
+                          f"({len(keyframe_indices)/len(seq.frames)*100:.1f}% of total frames)")
+                else:
+                    print(f"[Tracker] Warning: No keyframe indices found for {seq.name}, "
+                          f"falling back to dense tracking")
+                    use_keyframe = False
+        # ========================================================
+
         for frame_num, frame_path in enumerate(seq.frames[1:], start=1):
             image = self._read_image(frame_path)
 
@@ -149,7 +177,20 @@ class Tracker:
                     if current_soi and 'text' in current_soi:
                         info['soi_info'] = current_soi
 
-            out = tracker.track(image, info)
+            # ========== 稀疏跟踪：判断是否为关键帧 ==========
+            if use_keyframe and keyframe_indices:
+                # 如果不是关键帧，跳过VLM推理
+                if frame_num not in keyframe_indices:
+                    # 非关键帧: 填充None或NaN bbox
+                    out = None
+                else:
+                    # 关键帧: 正常调用tracker
+                    info['is_keyframe'] = True  # 标记为关键帧（可选，tracker内部可使用）
+                    out = tracker.track(image, info)
+            else:
+                # 密集跟踪：每帧都调用tracker
+                out = tracker.track(image, info)
+            # ================================================
             
             # 处理稀疏跟踪: 如果返回None则填充NaN (保持完整长度)
             if out is None:
