@@ -38,13 +38,12 @@ def local_env_settings():
     settings.soi_bench_path = '/data/DATASETS_PUBLIC/SOIBench/test_anno'
 
     # =========== Keyframe paths for different datasets ===========
-    # 场景变化检测结果路径,用于稀疏跟踪
-    # lib/test/evaluation/local.py
-    settings.keyframe_root = {
-        'root': '/data/DATASETS_PUBLIC/SOIBench_f',
-        'model': 'scene_changes_resnet',
-        'threshold': 'top_10',
-    }
+    # 关键帧索引根目录，路径格式固定为:
+    #   {keyframe_root}/{dataset}/{split}/{seq_name}.jsonl
+    # 切换模型或阈值只需修改此路径最后两级即可，例如:
+    #   .../scene_changes_clip/top_10
+    #   .../scene_changes_resnet/top_30
+    settings.keyframe_root = '/data/DATASETS_PUBLIC/SOIBench/KeyFrame/scene_changes_resnet/top_10'
 
 
 

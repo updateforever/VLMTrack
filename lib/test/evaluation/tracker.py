@@ -148,7 +148,7 @@ class Tracker:
                 keyframe_indices = load_keyframe_indices(
                     dataset_name=self.dataset_name,
                     seq_name=seq.name,
-                    keyframe_config=keyframe_root  # 修改参数名
+                    keyframe_root=keyframe_root,
                 )
                 
                 if keyframe_indices:

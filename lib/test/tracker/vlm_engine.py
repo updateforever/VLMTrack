@@ -44,13 +44,11 @@ class VLMEngine:
     def _load_local_model(self):
         """加载本地模型"""
         from transformers import AutoProcessor
-        
+
         model_path = getattr(self.params, 'model_path', None)
         model_name = getattr(self.params, 'model_name', 'Qwen/Qwen3-VL-4B-Instruct')
-        
         actual_path = model_path or model_name
-        print(f"[VLMEngine] Loading local model: {actual_path}")
-        
+
         # 根据模型名选择模型类
         if 'qwen3' in actual_path.lower():
             from transformers import Qwen3VLForConditionalGeneration
@@ -58,35 +56,34 @@ class VLMEngine:
         else:
             from transformers import Qwen2_5_VLForConditionalGeneration
             model_class = Qwen2_5_VLForConditionalGeneration
-        
-        # 加载模型
+
+        # 加载模型（优先 flash_attention_2，失败则降级）
         try:
             self.model = model_class.from_pretrained(
-                actual_path, 
+                actual_path,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2", 
+                attn_implementation="flash_attention_2",
                 device_map="auto"
             )
         except Exception:
-            # Fallback: 不使用flash attention
             self.model = model_class.from_pretrained(
-                actual_path, 
-                torch_dtype=torch.bfloat16, 
+                actual_path,
+                torch_dtype=torch.bfloat16,
                 device_map="auto"
             )
-        
+
         self.model.eval()
         self.processor = AutoProcessor.from_pretrained(actual_path)
-        print(f"[VLMEngine] Model loaded: {model_class.__name__}")
     
     def _setup_api(self):
-        """配置API"""
+        """配置API，并缓存客户端实例"""
+        from openai import OpenAI
         self.api_model = getattr(self.params, 'api_model', 'qwen3-vl-235b-a22b-instruct')
-        self.api_base_url = getattr(self.params, 'api_base_url', 
-                                     'https://dashscope.aliyuncs.com/compatible-mode/v1')
+        self.api_base_url = getattr(self.params, 'api_base_url',
+                                    'https://dashscope.aliyuncs.com/compatible-mode/v1')
         self.api_key = getattr(self.params, 'api_key', os.environ.get('DASHSCOPE_API_KEY', ''))
-        
-        print(f"[VLMEngine] API mode: {self.api_model}")
+        # 缓存客户端，避免每帧重复创建
+        self.client = OpenAI(api_key=self.api_key, base_url=self.api_base_url)
     
     def infer(self, images: List[np.ndarray], prompt: str) -> str:
         """
@@ -105,16 +102,13 @@ class VLMEngine:
             return self._infer_local(images, prompt)
     
     def _infer_api(self, images: List[np.ndarray], prompt: str) -> str:
-        """API模式推理"""
-        # 转换为base64
+        """API模式推理（复用缓存的client）"""
         images_b64 = [numpy_to_base64(img) for img in images]
-        
         return call_vlm_api(
             images_b64=images_b64,
             prompt=prompt,
             model_name=self.api_model,
-            base_url=self.api_base_url,
-            api_key=self.api_key,
+            client=self.client,
         )
     
     def _infer_local(self, images: List[np.ndarray], prompt: str) -> str:
@@ -140,11 +134,12 @@ class VLMEngine:
         )
         inputs = inputs.to(self.model.device)
         
-        # 生成
+        # 生成（max_new_tokens可通过params配置，默认512）
+        max_new_tokens = getattr(self.params, 'max_new_tokens', 512)
         with torch.no_grad():
             generated_ids = self.model.generate(
-                **inputs, 
-                max_new_tokens=256, 
+                **inputs,
+                max_new_tokens=max_new_tokens,
                 do_sample=False
             )
         

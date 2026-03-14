@@ -1,264 +1,128 @@
 # 关键帧路径配置指南
 
-## 📁 路径结构
+## 📁 路径结构（固定格式）
 
 ```
-/data/DATASETS_PUBLIC/SOIBench_f/              # 基础路径 (root)
-├── scene_changes_resnet/                      # 筛选模型 (model)
-│   ├── top_10/                               # 筛选阈值 (threshold)
-│   │   ├── lasot/                            # 数据集
-│   │   │   ├── train/                       # split
+/data/DATASETS_PUBLIC/SOIBench/KeyFrame/    ← 固定根目录
+├── scene_changes_resnet/                   ← 检测模型
+│   ├── top_10/                             ← 关键帧比例
+│   │   ├── lasot/
+│   │   │   ├── val/
+│   │   │   │   └── airplane-1.jsonl
+│   │   │   └── test/
+│   │   ├── mgit/                           ← videocube 数据集对应目录
 │   │   │   ├── val/
 │   │   │   └── test/
-│   │   │       └── airplane-1.jsonl         # 序列文件
-│   │   ├── tnl2k/
-│   │   └── videocube/
+│   │   └── tnl2k/
+│   │       └── test/
 │   ├── top_30/
 │   └── top_80/
-└── scene_changes_clip/                        # 另一个筛选模型
+└── scene_changes_clip/
     ├── top_10/
     └── top_30/
 ```
 
-**完整路径**: `{root}/{model}/{threshold}/{dataset}/{split}/{seq_name}.jsonl`
+**完整路径格式**: `{keyframe_root}/{dataset}/{split}/{seq_name}.jsonl`
+
+其中 `keyframe_root` 已包含模型和阈值层级，例如：
+```
+/data/DATASETS_PUBLIC/SOIBench/KeyFrame/scene_changes_resnet/top_10
+```
 
 ---
 
-## ⚙️ 配置方式
+## ⚙️ 配置方式（唯一入口）
 
-### 方式1: 在env_settings中配置（推荐）
-
-编辑 `lib/test/evaluation/local.py`:
+编辑 `lib/test/evaluation/local.py`，修改 `keyframe_root` 的最后两级路径即可切换模型/阈值：
 
 ```python
-# =========== Keyframe Configuration ===========
-settings.keyframe_root = {
-    'root': '/data/DATASETS_PUBLIC/SOIBench_f',
-    'model': 'scene_changes_clip',       # 可选: scene_changes_resnet
-    'threshold': 'top_10',               # 可选: top_30, top_80
-}
+# lib/test/evaluation/local.py
+settings.keyframe_root = '/data/DATASETS_PUBLIC/SOIBench/KeyFrame/scene_changes_resnet/top_10'
 ```
 
-### 方式2: 在参数文件中直接指定
+切换示例：
+```python
+# 使用 CLIP 模型
+settings.keyframe_root = '/data/DATASETS_PUBLIC/SOIBench/KeyFrame/scene_changes_clip/top_10'
 
-编辑 `lib/test/parameter/qwen_vlm.py`:
+# 使用 top_30 阈值
+settings.keyframe_root = '/data/DATASETS_PUBLIC/SOIBench/KeyFrame/scene_changes_resnet/top_30'
+```
+
+三个 tracker 的参数文件（`qwen_vlm.py` / `qwen_vlm_memory.py` / `qwen_vlm_three.py`）
+均通过以下方式读取，**无需修改参数文件**：
 
 ```python
-params.keyframe_root = {
-    'root': '/data/DATASETS_PUBLIC/SOIBench_f',
-    'model': 'scene_changes_resnet',     # 使用不同的模型
-    'threshold': 'top_30',               # 使用不同的阈值
-}
+params.keyframe_root = getattr(env, 'keyframe_root', '')
 ```
 
-### 旧版配置（向后兼容）
+---
+
+## 🔍 dataset_name → 目录 映射表
+
+加载时，`keyframe_loader.py` 中的 `_DATASET_MAP` 决定如何将 `dataset_name` 转换为目录路径：
+
+| 注册的 dataset_name         | dataset 目录 | split  |
+|-----------------------------|-------------|--------|
+| `lasot`                     | lasot       | test   |
+| `lasot_test`                | lasot       | test   |
+| `lasot_val`                 | lasot       | val    |
+| `videocube` / `videocube_test` | mgit     | test   |
+| `videocube_val`             | mgit        | val    |
+| `videocube_test_tiny`       | mgit        | test   |
+| `videocube_val_tiny`        | mgit        | val    |
+| `tnl2k` / `tnl2k_test`     | tnl2k       | test   |
+| `tnl2k_val`                 | tnl2k       | val    |
+| `mgit` / `mgit_test`        | mgit        | test   |
+| `mgit_val`                  | mgit        | val    |
+
+> 新增数据集时，只需在 `keyframe_loader.py` 的 `_DATASET_MAP` 中添加一行即可。
+
+---
+
+## 📝 索引文件格式
+
+支持两种 JSON 格式（优先级依次）：
+
+```json
+// 格式1（标准）：
+{"key_frames": [0, 8, 17, 25, 34, ...]}
+
+// 格式2（纯数组）：
+[0, 8, 17, 25, 34, ...]
+```
+
+---
+
+## 🔧 loader 使用方式
 
 ```python
-# 仍然支持字符串路径
-params.keyframe_root = '/path/to/keyframe_indices'
+from lib.test.evaluation.keyframe_loader import load_keyframe_indices
+
+indices = load_keyframe_indices(
+    dataset_name='lasot_test',
+    seq_name='airplane-1',
+    keyframe_root='/data/DATASETS_PUBLIC/SOIBench/KeyFrame/scene_changes_resnet/top_10',
+)
+# → {0, 8, 17, 25, ...}  or None
 ```
 
----
-
-## 🔍 Dataset名称解析
-
-框架自动从`dataset_name`解析出`dataset`和`split`:
-
-| 注册的dataset_name | 解析为dataset | 解析为split |
-|--------------------|--------------|------------|
-| `lasot` | lasot | test (默认) |
-| `lasot_test` | lasot | test |
-| `lasot_val` | lasot | val |
-| `videocube_test` | videocube | test |
-| `videocube_val` | videocube | val |
-| `tnl2k` | tnl2k | test (默认) |
-
----
-
-## 📝 使用示例
-
-### 示例1: 使用scene_changes_clip模型
-
-```python
-# local.py配置
-settings.keyframe_root = {
-    'root': '/data/DATASETS_PUBLIC/SOIBench_f',
-    'model': 'scene_changes_clip',
-    'threshold': 'top_10',
-}
-```
-
-**运行测试**:
-```bash
-python tracking/test.py qwen_vlm api --dataset_name lasot_test --sequence airplane-1
-```
-
-**查找路径**:
-```
-/data/DATASETS_PUBLIC/SOIBench_f/
-  scene_changes_clip/
-    top_10/
-      lasot/
-        test/
-          airplane-1.jsonl  # ✅ 找到
-```
-
-### 示例2: 使用scene_changes_resnet模型 + top_30阈值
-
-```python
-settings.keyframe_root = {
-    'root': '/data/DATASETS_PUBLIC/SOIBench_f',
-    'model': 'scene_changes_resnet',
-    'threshold': 'top_30',
-}
-```
-
-**运行测试**:
-```bash
-python tracking/test.py qwen_vlm_three api --dataset_name videocube_val --sequence seq001
-```
-
-**查找路径**:
-```
-/data/DATASETS_PUBLIC/SOIBench_f/
-  scene_changes_resnet/
-    top_30/
-      videocube/
-        val/
-          seq001.jsonl  # ✅ 找到
-```
-
----
-
-## 🎯 配置参数说明
-
-### root
-- **含义**: 关键帧索引文件的基础路径
-- **示例**: `/data/DATASETS_PUBLIC/SOIBench_f`
-
-### model
-- **含义**: 场景变化检测模型
-- **可选值**:
-  - `scene_changes_clip` - 使用CLIP模型检测
-  - `scene_changes_resnet` - 使用ResNet模型检测
-- **默认值**: `scene_changes_clip`
-
-### threshold  
-- **含义**: 关键帧筛选阈值级别
-- **可选值**:
-  - `top_10` - 保留10%的关键帧（稀疏）
-  - `top_30` - 保留30%的关键帧（中等）
-  - `top_80` - 保留80%的关键帧（密集）
-- **默认值**: `top_10`
-
----
-
-## 🔧 路径查找逻辑
-
-### 新版结构查找
-
-1. **解析dataset_name**
-   - `lasot_test` → dataset=`lasot`, split=`test`
-   - `videocube_val` → dataset=`videocube`, split=`val`
-
-2. **构建候选路径**
-   ```
-   {root}/{model}/{threshold}/{dataset}/{split}/{seq_name}.jsonl
-   {root}/{model}/{threshold}/{dataset}/{split}/{seq_name}.json
-   ```
-
-3. **如果dataset_name没有split后缀，尝试其他split**
-   ```
-   {root}/{model}/{threshold}/{dataset}/val/{seq_name}.jsonl
-   {root}/{model}/{threshold}/{dataset}/train/{seq_name}.jsonl
-   ```
-
-### 旧版结构查找（向后兼容）
-
-```
-{root}/{dataset}/{seq_name}.jsonl
-{root}/{dataset}/{seq_name}.json
-{root}/{dataset}/{category}/{seq_name}.jsonl
-```
-
----
-
-## ✨ 优势
-
-- ✅ **灵活的模型选择**: 支持多种场景变化检测模型
-- ✅ **可配置的阈值**: 轻松切换不同的筛选密度
-- ✅ **清晰的split管理**: 自动解析train/val/test
-- ✅ **向后兼容**: 仍支持旧版简单路径
-- ✅ **易于扩展**: 添加新模型或阈值只需修改配置
-
----
-
-## 🔄 切换不同配置
-
-### 测试不同模型
-
-```python
-# CLIP模型
-params.keyframe_root = {
-    'root': '/data/DATASETS_PUBLIC/SOIBench_f',
-    'model': 'scene_changes_clip',
-    'threshold': 'top_10',
-}
-
-# ResNet模型
-params.keyframe_root = {
-    'root': '/data/DATASETS_PUBLIC/SOIBench_f',
-    'model': 'scene_changes_resnet',
-    'threshold': 'top_10',
-}
-```
-
-### 测试不同阈值
-
-```python
-# 稀疏跟踪 (10%)
-params.keyframe_root['threshold'] = 'top_10'
-
-# 中等密度 (30%)
-params.keyframe_root['threshold'] = 'top_30'
-
-# 密集跟踪 (80%)
-params.keyframe_root['threshold'] = 'top_80'
-```
-
----
-
-## 📌 注意事项
-
-1. **文件格式**: 优先查找`.jsonl`文件，其次是`.json`文件
-2. **dataset注册**: 确保dataset已在`datasets.py`中正确注册
-3. **路径存在性**: 确保配置的路径在文件系统中确实存在
-4. **权限**: 确保有读取关键帧索引文件的权限
+返回值为 `Set[int]`（帧号集合，0-indexed），找不到文件时返回 `None`。
 
 ---
 
 ## 🚀 快速开始
 
-1. **配置keyframe_root**:
-   ```python
-   # lib/test/evaluation/local.py
-   settings.keyframe_root = {
-       'root': '/data/DATASETS_PUBLIC/SOIBench_f',
-       'model': 'scene_changes_clip',
-       'threshold': 'top_10',
-   }
-   ```
+1. 在 `local.py` 中设置 `keyframe_root`（一行搞定）
+2. 确保 tracker 参数中 `use_keyframe = True`（三个 tracker 默认已开启）
+3. 运行：
 
-2. **运行tracker**:
-   ```bash
-   python tracking/test.py qwen_vlm api \
-       --dataset_name lasot_test \
-       --debug 1
-   ```
+```bash
+python tracking/test.py qwen_vlm api --dataset_name lasot_test --sequence airplane-1
+```
 
-3. **检查日志**:
-   ```
-   [KeyframeLoader] Loaded 45 keyframes for airplane-1 from airplane-1.jsonl
-   ```
-
-**配置完成！** 🎉
+日志输出示例：
+```
+[KeyframeLoader] Loaded 45 keyframes for 'airplane-1'
+[Tracker] Loaded 45 keyframes for airplane-1 (9.8% of total frames)
+```

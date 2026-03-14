@@ -191,48 +191,48 @@ def call_vlm_api(
     images_b64: List[str],
     prompt: str,
     model_name: str,
-    base_url: str,
-    api_key: str,
+    base_url: str = '',
+    api_key: str = '',
+    client=None,
     temperature: float = 0.1,
-    max_tokens: int = 256,
+    max_tokens: int = 512,
     retries: int = 3,
 ) -> str:
     """
-    调用OpenAI兼容的VLM API
-    
+    调用OpenAI兼容的VLM API。
+
     Args:
         images_b64: base64编码的图像列表
-        prompt: 文本prompt
+        prompt:     文本prompt
         model_name: 模型名称
-        base_url: API基础URL
-        api_key: API密钥
+        base_url:   API基础URL（client无效时使用）
+        api_key:    API密鄉（client无效时使用）
+        client:     预建的OpenAI客户端，传入可避免重复创建
         temperature: 温度参数
         max_tokens: 最大token数
-        retries: 重试次数
-    
+        retries:    重试次数
+
     Returns:
         模型输出文本
     """
     from openai import OpenAI
-    
+
+    _client = client or OpenAI(api_key=api_key, base_url=base_url)
+
     # 构建消息内容
     content = []
     for b64 in images_b64:
         content.append({
-            "type": "image_url", 
+            "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
         })
     content.append({"type": "text", "text": prompt})
-    
-    # 创建客户端
-    client = OpenAI(api_key=api_key, base_url=base_url)
     messages = [{"role": "user", "content": content}]
-    
-    # 重试机制
+
     last_err = None
     for _ in range(max(1, retries)):
         try:
-            resp = client.chat.completions.create(
+            resp = _client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 temperature=temperature,
@@ -242,7 +242,7 @@ def call_vlm_api(
         except Exception as e:
             last_err = e
             time.sleep(1.0)
-    
+
     raise RuntimeError(f"API调用失败: {last_err}")
 
 
