@@ -115,17 +115,20 @@ class ThreeImageTrackingPrompt(PromptTemplate):
         )
 
 
-# ==================== 记忆库跟踪Prompt ====================
+# ==================== 认知跟踪Prompt（新版）====================
 
-class MemoryBankPrompt(PromptTemplate):
+class CognitiveTrackingPrompt(PromptTemplate):
     """
-    记忆库跟踪: 语义记忆 + 上一帧(蓝框) + 当前帧
-    改进: 引导关注外观变化(光照/尺度/形变)、结构化记忆更新
+    认知跟踪: 语义记忆 + 全图搜索 + 结构化状态判断
+    核心改进:
+      1. 强制全图搜索，不依赖位置先验
+      2. 结构化输出：target_status（选择题）+ environment_status（多选）
+      3. 认知推理：tracking_evidence（主观性文本描述）
     """
     def __init__(self):
         super().__init__(
-            name="memory_bank_tracking",
-            description="Tracking with semantic memory bank"
+            name="cognitive_tracking",
+            description="Cognitive tracking with global search and structured reasoning"
         )
 
     def build(self,
@@ -134,46 +137,164 @@ class MemoryBankPrompt(PromptTemplate):
               memory_context: str = "") -> str:
         return (
             "# --- TASK ---\n"
-            "Track a target using semantic memory and recent motion. The target may have changed "
-            "appearance due to lighting, scale, or deformation.\n\n"
+            "You are a cognitive tracker. Track the target using semantic memory and visual reasoning.\n"
+            "DO NOT rely on previous position - search the ENTIRE image.\n\n"
 
-            "# --- SEMANTIC MEMORY (accumulated from previous frames) ---\n"
+            "# --- SEMANTIC MEMORY ---\n"
             f"Appearance: {memory_appearance}\n"
             f"Motion: {memory_motion}\n"
             f"Context: {memory_context}\n\n"
 
-            "# --- INPUTS ---\n"
-            "Image 1 (Previous Frame - BLUE box): Recent position. Use for motion estimation.\n"
-            "Image 2 (Current Frame): Locate the target here.\n\n"
+            "# --- INPUT ---\n"
+            "Image 1 (Previous Frame - BLUE box): Last known position. Use ONLY for motion estimation, NOT as search constraint.\n"
+            "Image 2 (Current Frame): Search the ENTIRE image for the target.\n\n"
 
-            "# --- TRACKING STRATEGY ---\n"
-            "Step 1 - Recall target from memory:\n"
-            "  - Color/texture may shift due to lighting changes — allow some tolerance\n"
-            "  - Size may change due to camera zoom or depth change\n"
-            "  - Shape may deform (e.g., person walking, animal moving)\n\n"
-            "Step 2 - Estimate motion from Image 1 (BLUE box position):\n"
-            "  - Predict where target has moved in Image 2\n\n"
-            "Step 3 - Find best match in Image 2:\n"
-            "  - Combine memory description + motion prediction\n"
-            "  - If target is not present: output [0,0,0,0]\n\n"
-            "Step 4 - Update semantic memory with current observation.\n\n"
+            "# --- COGNITIVE TRACKING STRATEGY ---\n\n"
+            "Step 1 - Analyze Current Scene:\n"
+            "  - Is this the same scene as memory context?\n"
+            "  - If scene changed significantly → mark 'scene_change' in environment_status\n"
+            "  - Check lighting, blur, clutter, crowding\n\n"
+
+            "Step 2 - Global Search (CRITICAL):\n"
+            "  - Scan the ENTIRE image, not just near BLUE box\n"
+            "  - Look for objects matching appearance memory\n"
+            "  - Consider scale changes, rotation, partial occlusion\n"
+            "  - Do NOT assume target is near previous position\n\n"
+
+            "Step 3 - Target Status Judgment:\n"
+            "  - normal: Target clearly visible, no occlusion\n"
+            "  - partially_occluded: Target partially blocked but identifiable\n"
+            "  - fully_occluded: Target completely blocked but likely still in scene\n"
+            "  - out_of_view: Target moved out of frame\n"
+            "  - disappeared: Target vanished from scene (entered building, etc.)\n"
+            "  - reappeared: Target was absent but now visible again\n\n"
+
+            "Step 4 - Environment Analysis:\n"
+            "  Select ALL applicable conditions:\n"
+            "  - normal: Normal lighting and scene\n"
+            "  - low_light: Dark environment, low visibility\n"
+            "  - high_light: Overexposure, backlight, glare\n"
+            "  - motion_blur: Fast motion causing blur\n"
+            "  - scene_change: Scene changed significantly (cut, viewpoint shift)\n"
+            "  - viewpoint_change: Camera angle changed\n"
+            "  - scale_change: Target scale changed significantly\n"
+            "  - crowded: Many similar objects, high interference\n"
+            "  - background_clutter: Complex background, hard to distinguish\n\n"
+
+            "Step 5 - Generate Tracking Evidence (2-4 sentences in English):\n"
+            "  - What is the target? (appearance, category)\n"
+            "  - What is it doing? (motion, action)\n"
+            "  - Why do you think this is the target? (match with memory)\n"
+            "  - How does environment affect tracking?\n\n"
 
             "# --- OUTPUT FORMAT ---\n"
-            "Respond with ONLY this JSON:\n"
+            "Respond with ONLY this JSON (no markdown fence):\n"
             "{\n"
-            '  "bbox": [x1, y1, x2, y2],  // 0-1000 scale. [0,0,0,0] if not visible.\n'
-            '  "evidence": "How memory matched and motion aligned (1-2 sentences)",\n'
+            '  "target_status": "normal",              // Choose ONE: normal/partially_occluded/fully_occluded/out_of_view/disappeared/reappeared\n'
+            '  "environment_status": ["normal"],       // Choose ALL applicable from list above\n'
+            '  "bbox": [x1, y1, x2, y2],              // 0-1000 scale. [0,0,0,0] if not visible\n'
+            '  "tracking_evidence": "The target is ...",  // 2-4 sentences in English\n'
+            '  "confidence": 0.9                       // 0.0=lost, 1.0=certain\n'
+            "}\n\n"
+
+            "CRITICAL RULES:\n"
+            "1. If target_status is fully_occluded/out_of_view/disappeared → bbox MUST be [0,0,0,0]\n"
+            "2. If target_status is normal/partially_occluded/reappeared → bbox MUST be valid coordinates\n"
+            "3. Search ENTIRE image, ignore BLUE box position constraint\n"
+            "4. tracking_evidence MUST explain your reasoning process\n"
+        )
+
+
+# ==================== 认知跟踪Prompt（Mosaic 版本）====================
+
+class CognitiveMosaicPrompt(PromptTemplate):
+    """
+    认知跟踪（Mosaic 版本）: 历史帧拼接 + 当前帧
+    """
+    def __init__(self):
+        super().__init__(
+            name="cognitive_mosaic_tracking",
+            description="Tracking with historical frame mosaic"
+        )
+
+    def build(self,
+              memory_story: str = "",
+              language_description: str = "",
+              num_history_frames: int = 2) -> str:
+        return (
+            "# === TASK: Cognitive Visual Tracking ===\n\n"
+            "You are performing cognitive visual tracking - maintaining continuous awareness of a target object across video frames.\n\n"
+
+            "## Input Description\n\n"
+            "**Image 1 (Historical Reference Mosaic)** contains:\n"
+            "- **Initial Template**: Frame #0 with GREEN bounding box (ground truth annotation)\n"
+            "- **Historical Trajectory Reference**: Several historical frames with RED bounding boxes (predicted results, may contain errors)\n\n"
+            "**Image 2 (Current Frame)**: Where you need to locate the target\n\n"
+            f"**Long-term Memory (Narrative)**:\n{memory_story}\n\n"
+            f"**Initial Target Description** (optional):\n{language_description}\n\n"
+
+            "## Your Goal\n"
+            "1. Identify the target based on given information\n"
+            "2. Reason about target's state and location with evidence\n"
+            "3. Update long-term memory to facilitate future tracking\n\n"
+            "---\n\n"
+
+            "# === OUTPUT REQUIREMENTS ===\n\n"
+            "## 1. Current Frame Prediction\n\n"
+            "### Target Status (choose ONE option):\n"
+            "A. normal - Target clearly visible\n"
+            "B. partially_occluded - Target partially blocked but identifiable\n"
+            "C. fully_occluded - Target completely blocked but likely still in scene\n"
+            "D. out_of_view - Target moved outside frame boundaries\n"
+            "E. disappeared - Target vanished from scene\n"
+            "F. reappeared - Target returned after being absent\n\n"
+
+            "### Bounding Box:\n"
+            "- If visible or location inferable (A/B/C/F): Provide [x1, y1, x2, y2] in 0-1000 scale\n"
+            "- If completely unlocatable (D/E): Output [0, 0, 0, 0]\n\n"
+
+            "### Environment Status (select ALL applicable options):\n"
+            "A. normal\n"
+            "B. low_light\n"
+            "C. high_light\n"
+            "D. motion_blur\n"
+            "E. scene_change\n"
+            "F. viewpoint_change\n"
+            "G. scale_change\n"
+            "H. crowded\n"
+            "I. background_clutter\n\n"
+
+            "## 2. Tracking Evidence (Short-term Memory)\n"
+            "Explain your reasoning for this frame's prediction (2-4 sentences):\n"
+            "- What is the target and what is it doing?\n"
+            "- Why do you believe this is (or isn't) the target?\n"
+            "- What evidence supports your status judgment?\n\n"
+
+            "## 3. Confidence Score\n"
+            "Your confidence in the prediction (0.0-1.0, 0.1 granularity)\n\n"
+
+            "## 4. Long-term Memory Update (Narrative)\n"
+            "Update the story of target's journey (concise but complete):\n"
+            "- Describe target's appearance, motion trajectory, state changes\n"
+            "- Maintain narrative coherence\n"
+            "- Include predictions about future developments\n\n"
+            "---\n\n"
+
+            "# === OUTPUT FORMAT ===\n\n"
+            "{\n"
+            '  "target_status": "A",\n'
+            '  "environment_status": ["A"],\n'
+            '  "bbox": [x1, y1, x2, y2],\n'
+            '  "tracking_evidence": "The target is a red sedan moving right...",\n'
             '  "confidence": 0.9,\n'
-            '  "state": {\n'
-            '    "appearance": "Updated appearance (note any changes from memory)",\n'
-            '    "motion": "Current motion direction and estimated speed",\n'
-            '    "context": "Current surrounding scene and relative position"\n'
-            '  }\n'
+            '  "memory_update": {\n'
+            '    "story": "A red sedan with white stripes traveling on an urban road..."\n'
+            "  }\n"
             "}\n"
         )
 
 
-# ==================== 初始记忆生成Prompt ====================
+# ==================== 初始记忆生成Prompt（改进版）====================
 
 class InitialMemoryPrompt(PromptTemplate):
     """
@@ -209,11 +330,18 @@ class InitialMemoryPrompt(PromptTemplate):
             "   - Target's position in the frame\n\n"
 
             "# --- OUTPUT FORMAT ---\n"
-            "Respond with ONLY this JSON:\n"
+            "Respond with ONLY this JSON (no markdown fence):\n"
             "{\n"
-            '  "appearance": "Detailed description emphasizing discriminative features for re-identification",\n'
-            '  "motion": "Current motion state (stationary / moving direction + speed)",\n'
-            '  "context": "Scene type and spatial context"\n'
+            '  "appearance": "Detailed appearance description in English (colors, shape, texture, unique features)",\n'
+            '  "motion": "Current motion state in English (moving/stationary, direction, speed)",\n'
+            '  "context": "Scene context in English (environment type, nearby objects, position)"\n'
+            "}\n\n"
+
+            "Example:\n"
+            "{\n"
+            '  "appearance": "A red sedan with white side stripes, rectangular headlights, a roof rack, and a medium-sized body.",\n'
+            '  "motion": "Moving to the right at a moderate speed in a mostly straight path.",\n'
+            '  "context": "An urban road scene with nearby vehicles and buildings, with the target slightly right of center."\n'
             "}\n"
         )
 
@@ -229,7 +357,8 @@ class PromptManager:
         # 跟踪prompt
         "two_image": TwoImageTrackingPrompt(),
         "three_image": ThreeImageTrackingPrompt(),
-        "memory_bank": MemoryBankPrompt(),
+        "cognitive": CognitiveTrackingPrompt(),  # 认知跟踪（统一框架）
+        "cognitive_mosaic": CognitiveMosaicPrompt(),  # 认知跟踪（Mosaic 版本）
 
         # 辅助prompt
         "init_memory": InitialMemoryPrompt(),
@@ -244,7 +373,8 @@ class PromptManager:
             prompt_name: prompt名称，可选:
                 - "two_image": 两图跟踪
                 - "three_image": 三图跟踪
-                - "memory_bank": 记忆库跟踪
+                - "cognitive": 认知跟踪
+                - "cognitive_mosaic": 认知跟踪（Mosaic 版本）
                 - "init_memory": 初始记忆生成
 
         Returns:
@@ -286,7 +416,7 @@ def get_prompt(prompt_name: str, **kwargs) -> str:
 
     Example:
         >>> prompt = get_prompt("two_image", target_description="a red car")
-        >>> prompt = get_prompt("memory_bank",
+        >>> prompt = get_prompt("cognitive",
         ...                     memory_appearance="red sedan",
         ...                     memory_motion="moving right")
     """
@@ -314,9 +444,9 @@ if __name__ == "__main__":
     print(prompt)
 
     print("\n" + "="*60)
-    print("Memory Bank Tracking Prompt:")
+    print("Cognitive Tracking Prompt:")
     print("="*60)
-    prompt = get_prompt("memory_bank",
+    prompt = get_prompt("cognitive",
                        memory_appearance="red sedan with chrome trim",
                        memory_motion="moving rightward at moderate speed",
                        memory_context="highway with other vehicles")

@@ -258,14 +258,14 @@ def dict_to_str(val):
 def parse_memory_state(text: str) -> Optional[dict]:
     """
     从VLM输出解析记忆状态
-    
+
     Returns:
         {"appearance": str, "motion": str, "context": str} 或 None
     """
     try:
         t = strip_code_fence(text)
         data = json.loads(t)
-        
+
         if isinstance(data, dict) and "state" in data:
             state = data["state"]
             if isinstance(state, dict):
@@ -274,7 +274,7 @@ def parse_memory_state(text: str) -> Optional[dict]:
                     "motion": dict_to_str(state.get("motion", "")),
                     "context": dict_to_str(state.get("context", ""))
                 }
-        
+
         # 直接是状态字典
         if isinstance(data, dict) and "appearance" in data:
             return {
@@ -282,8 +282,173 @@ def parse_memory_state(text: str) -> Optional[dict]:
                 "motion": dict_to_str(data.get("motion", "")),
                 "context": dict_to_str(data.get("context", ""))
             }
-    
+
     except Exception:
         pass
-    
+
+    return None
+
+
+# ============== 认知跟踪输出解析 ==============
+
+def parse_cognitive_output(text: str, img_width: int, img_height: int) -> Optional[dict]:
+    """
+    解析认知跟踪输出（新版结构化格式）
+
+    Returns:
+        {
+            'target_status': str,
+            'environment_status': List[str],
+            'bbox': List[float],  # XYWH format
+            'tracking_evidence': str,
+            'confidence': float
+        } 或 None
+    """
+    try:
+        t = strip_code_fence(text)
+        data = json.loads(t)
+
+        # 验证 target_status
+        valid_target_status = [
+            'normal', 'partially_occluded', 'fully_occluded',
+            'out_of_view', 'disappeared', 'reappeared'
+        ]
+        target_status = data.get('target_status', 'normal')
+        if target_status not in valid_target_status:
+            target_status = 'normal'
+
+        # 验证 environment_status
+        valid_env_status = [
+            'normal', 'low_light', 'high_light', 'motion_blur',
+            'scene_change', 'viewpoint_change', 'scale_change',
+            'crowded', 'background_clutter'
+        ]
+        env_status = data.get('environment_status', ['normal'])
+        if not isinstance(env_status, list):
+            env_status = ['normal']
+        env_status = [s for s in env_status if s in valid_env_status]
+        if not env_status:
+            env_status = ['normal']
+
+        # 解析 bbox
+        bbox_xyxy = None
+        if 'bbox' in data:
+            b = safe_float_list(data['bbox'])
+            if b and b != [0, 0, 0, 0]:
+                b = convert_to_pixel_bbox(b, img_width, img_height)
+                bbox_xyxy = fix_and_clip_bbox(b, img_width, img_height)
+
+        # 验证 bbox 与 target_status 的一致性
+        visible_status = ['normal', 'partially_occluded', 'reappeared']
+        if target_status in visible_status and bbox_xyxy is None:
+            # 状态说可见但没有 bbox，标记为解析失败
+            return None
+
+        if target_status not in visible_status and bbox_xyxy is not None:
+            # 状态说不可见但有 bbox，强制清零
+            bbox_xyxy = None
+
+        bbox_xywh = xyxy_to_xywh(bbox_xyxy) if bbox_xyxy else [0, 0, 0, 0]
+
+        return {
+            'target_status': target_status,
+            'environment_status': env_status,
+            'bbox': bbox_xywh,
+            'tracking_evidence': data.get('tracking_evidence', ''),
+            'confidence': float(data.get('confidence', 0.5))
+        }
+
+    except Exception:
+        pass
+
+    return None
+
+
+def parse_mosaic_output(text: str, img_width: int, img_height: int) -> Optional[dict]:
+    """
+    解析 Mosaic 认知跟踪输出（选项格式 A/B/C/D/E/F）
+
+    Returns:
+        {
+            'target_status': str,
+            'environment_status': List[str],
+            'bbox': List[float],  # XYWH format
+            'tracking_evidence': str,
+            'confidence': float,
+            'memory_update': dict  # {'story': str}
+        } 或 None
+    """
+    # 选项映射
+    status_map = {
+        'A': 'normal',
+        'B': 'partially_occluded',
+        'C': 'fully_occluded',
+        'D': 'out_of_view',
+        'E': 'disappeared',
+        'F': 'reappeared'
+    }
+
+    env_map = {
+        'A': 'normal',
+        'B': 'low_light',
+        'C': 'high_light',
+        'D': 'motion_blur',
+        'E': 'scene_change',
+        'F': 'viewpoint_change',
+        'G': 'scale_change',
+        'H': 'crowded',
+        'I': 'background_clutter'
+    }
+
+    try:
+        t = strip_code_fence(text)
+        data = json.loads(t)
+
+        # 解析 target_status（选项格式）
+        target_option = data.get('target_status', 'A')
+        target_status = status_map.get(target_option, 'normal')
+
+        # 解析 environment_status（选项列表）
+        env_options = data.get('environment_status', ['A'])
+        if not isinstance(env_options, list):
+            env_options = ['A']
+        env_status = [env_map.get(opt, 'normal') for opt in env_options if opt in env_map]
+        if not env_status:
+            env_status = ['normal']
+
+        # 解析 bbox
+        bbox_xyxy = None
+        if 'bbox' in data:
+            b = safe_float_list(data['bbox'])
+            if b and b != [0, 0, 0, 0]:
+                b = convert_to_pixel_bbox(b, img_width, img_height)
+                bbox_xyxy = fix_and_clip_bbox(b, img_width, img_height)
+
+        # 验证 bbox 与 target_status 的一致性
+        visible_status = ['normal', 'partially_occluded', 'fully_occluded', 'reappeared']
+        if target_status in visible_status and bbox_xyxy is None:
+            return None
+
+        if target_status not in visible_status and bbox_xyxy is not None:
+            bbox_xyxy = None
+
+        bbox_xywh = xyxy_to_xywh(bbox_xyxy) if bbox_xyxy else [0, 0, 0, 0]
+
+        result = {
+            'target_status': target_status,
+            'environment_status': env_status,
+            'bbox': bbox_xywh,
+            'tracking_evidence': data.get('tracking_evidence', ''),
+            'confidence': float(data.get('confidence', 0.5))
+        }
+
+        # 提取 memory_update
+        if 'memory_update' in data and isinstance(data['memory_update'], dict):
+            result['memory_update'] = data['memory_update']
+
+        return result
+
+    except Exception:
+        pass
+
     return None
