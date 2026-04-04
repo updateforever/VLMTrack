@@ -55,6 +55,8 @@ class QwenVLMVisual(BaseTracker):
         self.frame_id = 0
         self.seq_name = None
         self.vis_dir = None
+        self.init_frame_num = 0
+        self.prev_frame_num = 0
 
     def initialize(self, image, info: dict):
         """初始化，固定初始帧"""
@@ -64,16 +66,21 @@ class QwenVLMVisual(BaseTracker):
         self.init_bbox = list(info['init_bbox'])
         self.prev_image = image.copy()
         self.prev_bbox = list(info['init_bbox'])
+        self.init_frame_num = info.get('frame_num', 0)
+        self.prev_frame_num = info.get('frame_num', 0)
 
         self.seq_name = info.get('seq_name', 'unknown')
+        self.run_tag = info.get('run_tag', None)
         lang = info.get('init_nlp', None)
         self.language_description = lang if lang else "the target object"
 
         if self.debug >= 2:
             env = env_settings()
-            self.vis_dir = os.path.join(
-                env.results_path, 'qwen_vlm_visual', 'vis', self.seq_name
-            )
+            vis_root = os.path.join(env.results_path, 'qwen_vlm_visual', 'vis')
+            if self.run_tag:
+                self.vis_dir = os.path.join(vis_root, self.run_tag, self.seq_name)
+            else:
+                self.vis_dir = os.path.join(vis_root, self.seq_name)
             os.makedirs(self.vis_dir, exist_ok=True)
 
         if self.debug >= 1:
@@ -83,6 +90,8 @@ class QwenVLMVisual(BaseTracker):
         """纯视觉跟踪"""
         self.frame_id += 1
         H, W = image.shape[:2]
+        current_frame_num = info.get('frame_num', self.frame_id) if info else self.frame_id
+        motion_frame_num = self.prev_frame_num
 
         try:
             # 构建输入图像序列
@@ -113,9 +122,14 @@ class QwenVLMVisual(BaseTracker):
                 # 更新上一帧（仅 num_frames=3 使用）
                 self.prev_image = image.copy()
                 self.prev_bbox = pred_bbox
+                self.prev_frame_num = current_frame_num
 
                 if self.debug >= 2:
-                    self._save_vis(images, pred_bbox)
+                    panel_titles = [f"Template Frame: {self.init_frame_num}"]
+                    if self.num_frames == 3:
+                        panel_titles.append(f"Motion Frame: {motion_frame_num}")
+                    panel_titles.append(f"Search Frame: {current_frame_num}")
+                    self._save_vis(images, pred_bbox, panel_titles, current_frame_num)
             else:
                 # Parse失败: last-frame fallback，保持 self.state 不变
                 if self.debug >= 1:
@@ -127,13 +141,25 @@ class QwenVLMVisual(BaseTracker):
 
         return {"target_bbox": self.state}
 
-    def _save_vis(self, images: List[np.ndarray], bbox: List[float]):
+    def _annotate_panel(self, image: np.ndarray, title: str) -> np.ndarray:
+        annotated = image.copy()
+        cv2.rectangle(annotated, (0, 0), (320, 30), (255, 255, 255), -1)
+        cv2.putText(annotated, title, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 1)
+        return annotated
+
+    def _save_vis(self, images: List[np.ndarray], bbox: List[float],
+                  panel_titles: List[str], current_frame_num: int):
         """保存可视化结果"""
         if not self.vis_dir:
             return
         result = draw_bbox(images[-1], bbox, color=(255, 0, 0))
-        combined = np.hstack([*images[:-1], result])
-        vis_path = os.path.join(self.vis_dir, f"{self.frame_id:04d}.jpg")
+        panels = [*images[:-1], result]
+        annotated_panels = [
+            self._annotate_panel(panel, title)
+            for panel, title in zip(panels, panel_titles)
+        ]
+        combined = np.hstack(annotated_panels)
+        vis_path = os.path.join(self.vis_dir, f"{current_frame_num:06d}.jpg")
         cv2.imwrite(vis_path, cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
 
 

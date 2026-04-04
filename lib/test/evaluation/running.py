@@ -24,8 +24,13 @@ def _save_tracker_output(seq: Sequence, tracker: Tracker, output: dict):
     #     base_results_path = os.path.join(tracker.results_dir, seq.name)
 
     def save_bb(file, data):
-        tracked_bb = np.array(data).astype(int)
-        np.savetxt(file, tracked_bb, delimiter='\t', fmt='%d')
+        tracked_bb = np.asarray(data, dtype=np.float64)
+        if np.isnan(tracked_bb).any():
+            np.savetxt(file, tracked_bb, delimiter='	', fmt='%.6f')
+        elif np.allclose(tracked_bb, np.round(tracked_bb)):
+            np.savetxt(file, tracked_bb.astype(int), delimiter='	', fmt='%d')
+        else:
+            np.savetxt(file, tracked_bb, delimiter='	', fmt='%.6f')
 
     def save_time(file, data):
         exec_times = np.array(data).astype(float)
@@ -99,9 +104,12 @@ def _save_tracker_output(seq: Sequence, tracker: Tracker, output: dict):
                 save_time(timings_file, data)
 
 
-def run_sequence(seq: Sequence, tracker: Tracker, debug=False, num_gpu=8):
+def run_sequence(seq: Sequence, tracker: Tracker, debug=False, num_gpu=8, run_tag=None):
     """Runs a tracker on a sequence."""
     '''2021.1.2 Add multiple gpu support'''
+    if run_tag is not None:
+        seq.dataset = run_tag
+
     try:
         worker_name = multiprocessing.current_process().name
         worker_id = int(worker_name[worker_name.find('-') + 1:]) - 1
@@ -149,11 +157,10 @@ def run_sequence(seq: Sequence, tracker: Tracker, debug=False, num_gpu=8):
 
     print('FPS: {}'.format(num_frames / exec_time))
 
-    if not debug:
-        _save_tracker_output(seq, tracker, output)
+    _save_tracker_output(seq, tracker, output)
 
 
-def run_dataset(dataset, trackers, debug=False, threads=0, num_gpus=8):
+def run_dataset(dataset, trackers, debug=False, threads=0, num_gpus=8, run_tag=None):
     """Runs a list of trackers on a dataset.
     args:
         dataset: List of Sequence instances, forming a dataset.
@@ -175,9 +182,9 @@ def run_dataset(dataset, trackers, debug=False, threads=0, num_gpus=8):
     if mode == 'sequential':
         for seq in dataset:
             for tracker_info in trackers:
-                run_sequence(seq, tracker_info, debug=debug)
+                run_sequence(seq, tracker_info, debug=debug, num_gpu=num_gpus, run_tag=run_tag)
     elif mode == 'parallel':
-        param_list = [(seq, tracker_info, debug, num_gpus) for seq, tracker_info in product(dataset, trackers)]
+        param_list = [(seq, tracker_info, debug, num_gpus, run_tag) for seq, tracker_info in product(dataset, trackers)]
         with multiprocessing.Pool(processes=threads) as pool:
             pool.starmap(run_sequence, param_list)
     print('Done')

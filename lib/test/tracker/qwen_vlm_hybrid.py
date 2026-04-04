@@ -101,7 +101,7 @@ class QwenVLMHybrid(BaseTracker):
                                    'two_image' if self.num_frames == 2 else 'three_image')
 
         # Cognitive 模式配置
-        self.track_prompt = getattr(params, 'track_prompt', 'memory_bank')
+        self.track_prompt = getattr(params, 'track_prompt', 'cognitive')
         self.init_prompt = getattr(params, 'init_prompt', 'init_memory')
         self.memory: Dict = {"appearance": "", "motion": "", "context": "", "last_update": 0}
 

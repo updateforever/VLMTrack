@@ -68,7 +68,7 @@ def parameters(yaml_name: str = "default_visual_kf"):
     )
 
     # ---- VLM Cognitive 模式专用 ----
-    params.track_prompt = 'memory_bank'
+    params.track_prompt = 'cognitive'
     params.init_prompt = 'init_memory'
 
     # ---- 置信度触发阈值 ----

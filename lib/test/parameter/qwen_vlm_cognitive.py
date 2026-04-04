@@ -20,8 +20,8 @@ def parameters(yaml_name: str = "default"):
 
     apply_vlm_config(params, yaml_name)
 
-    # Prompt 配置
-    params.track_prompt = 'memory_bank'
+    # Prompt 配置（使用新的认知跟踪 prompt）
+    params.track_prompt = 'cognitive'  # 新版结构化认知跟踪
     params.init_prompt = 'init_memory'
 
     # 调试与日志

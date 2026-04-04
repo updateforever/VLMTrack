@@ -82,9 +82,14 @@ class Tracker:
             debug_ = getattr(params, 'debug', 0)
 
         params.debug = debug_
+        params.debug_frames = getattr(self, 'debug_frames', None)
+        force_use_keyframe = getattr(self, 'force_use_keyframe', None)
+        if force_use_keyframe is not None:
+            params.use_keyframe = force_use_keyframe
 
         # Get init information
         init_info = seq.init_info()
+        init_info['run_tag'] = getattr(seq, 'dataset', None)
 
         tracker = self.create_tracker(params)
 
@@ -121,6 +126,7 @@ class Tracker:
         # Initialize
         image = self._read_image(seq.frames[0])
         init_info['seq_name'] = seq.name
+        init_info['frame_num'] = 0
         start_time = time.time()
         out = tracker.initialize(image, init_info)
         if out is None:
@@ -160,12 +166,20 @@ class Tracker:
                     use_keyframe = False
         # ========================================================
 
-        for frame_num, frame_path in enumerate(seq.frames[1:], start=1):
+        frame_paths = seq.frames[1:]
+        debug_frames = getattr(tracker.params, 'debug_frames', None)
+        if getattr(tracker.params, 'debug', 0) > 0 and debug_frames is not None:
+            debug_frames = max(int(debug_frames), 1)
+            frame_paths = seq.frames[1:debug_frames]
+            print(f"[Tracker] Debug mode: limiting sequence {seq.name} to first {min(len(seq.frames), debug_frames)} frames")
+
+        for frame_num, frame_path in enumerate(frame_paths, start=1):
             image = self._read_image(frame_path)
 
             start_time = time.time()
 
             info = seq.frame_info(frame_num)
+            info['frame_num'] = frame_num
             info['previous_output'] = prev_output
 
             # 把当前帧 (frame_num) 的 SOI 文本放入 info
