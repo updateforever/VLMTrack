@@ -230,12 +230,6 @@ class QwenVLMCognitiveMosaic(BaseTracker):
                     fid, False  # is_gt=False
                 ))
 
-            # 上一帧（红框，预测值）
-            frames_to_concat.append((
-                self.prev_frame[0], self.prev_frame[1], self.prev_frame[2],
-                self.frame_id - 1, False  # is_gt=False
-            ))
-
             mosaic = self._create_mosaic(frames_to_concat)
 
             # DEBUG: 可视化 mosaic（在调试控制台运行）
