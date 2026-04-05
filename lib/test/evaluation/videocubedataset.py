@@ -32,14 +32,8 @@ class VideoCubeDataset(BaseDataset):
 
         print('sequence_list', self.sequence_list)
 
-        if split == 'test' or split == 'val':
-            # self.base_path = self.env_settings.videocube_path  #
-            # self.base_path = "/mnt/data7/lxc/VideoCube"
-            self.base_path = "/data/DATASETS_PUBLIC/MGIT"
-        else:
-            # self.base_path = self.env_settings.videocube_path
-            # self.base_path = "/mnt/data7/lxc/VideoCube"
-            self.base_path = "/data/DATASETS_PUBLIC/MGIT"
+        # 数据集路径统一在 local.py 中配置
+        self.base_path = self.env_settings.videocube_path
 
     def get_sequence_list(self):
         return SequenceList([self._construct_sequence(s) for s in self.sequence_list])
