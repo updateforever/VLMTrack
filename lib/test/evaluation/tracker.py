@@ -83,9 +83,6 @@ class Tracker:
 
         params.debug = debug_
         params.debug_frames = getattr(self, 'debug_frames', None)
-        force_use_keyframe = getattr(self, 'force_use_keyframe', None)
-        if force_use_keyframe is not None:
-            params.use_keyframe = force_use_keyframe
 
         # Get init information
         init_info = seq.init_info()
@@ -355,6 +352,5 @@ class Tracker:
             return decode_img(image_file[0], image_file[1])
         else:
             raise ValueError("type of image_file should be str or list")
-
 
 

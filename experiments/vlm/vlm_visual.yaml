@@ -1,0 +1,7 @@
+num_frames: 2
+prompt_name: two_image
+debug: 0
+use_keyframe: true
+checkpoint: null
+save_all_boxes: false
+

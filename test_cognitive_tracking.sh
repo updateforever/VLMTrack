@@ -1,14 +1,16 @@
 #!/bin/bash
 # 认知跟踪测试脚本
+set -euo pipefail
 
 # 设置环境
-export PYTHONPATH=/data/wyp/VLMTrack:$PYTHONPATH
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 export DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
 
 # 测试数据集
 DATASET="videocube_val"  # MGIT val 集
-TRACKER="qwen_vlm_cognitive"
-CONFIG="default"  # 使用 API 模式
+TRACKER="vlm_cognitive"
+CONFIG="api_default"  # 使用 API 模式
 
 echo "========================================="
 echo "认知跟踪测试"
@@ -20,7 +22,7 @@ echo "========================================="
 
 # 运行测试（单序列调试）
 python tracking/test.py $TRACKER $CONFIG \
-    --dataset $DATASET \
+    --dataset_name $DATASET \
     --debug 1 \
     --threads 1
 

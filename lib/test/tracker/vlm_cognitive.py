@@ -28,7 +28,7 @@ from lib.test.tracker.prompts import get_prompt
 _EMPTY_MEMORY = {"appearance": "", "motion": "", "context": "", "last_update": 0}
 
 
-class QwenVLMCognitive(BaseTracker):
+class VLMCognitive(BaseTracker):
     """
     认知VLM跟踪器（新版）
 
@@ -94,7 +94,7 @@ class QwenVLMCognitive(BaseTracker):
 
         if self.debug >= 2:
             env = env_settings()
-            vis_root = os.path.join(env.results_path, 'qwen_vlm_cognitive', 'vis')
+            vis_root = os.path.join(env.results_path, 'vlm_cognitive', 'vis')
             if self.run_tag:
                 self.vis_dir = os.path.join(vis_root, self.run_tag, self.seq_name)
             else:
@@ -108,12 +108,15 @@ class QwenVLMCognitive(BaseTracker):
     def _generate_initial_memory(self, image: np.ndarray, bbox: List[float]):
         """调用VLM生成初始语义记忆，使用parse_memory_state统一解析"""
         img_with_box = draw_bbox(image, bbox, color=(0, 255, 0))
-        prompt = get_prompt(self.init_prompt)
+        prompt = get_prompt(self.init_prompt, target_description=self.language_description)
 
         try:
             output = self.vlm.infer([img_with_box], prompt)
             parsed = parse_memory_state(output)
             if parsed:
+                desc = (self.language_description or "").strip()
+                if desc and desc.lower() not in ("the target object", "target object"):
+                    parsed['appearance'] = f"{desc}; {parsed.get('appearance', '')}".strip("; ")
                 self.memory = {**parsed, "last_update": 0}
             else:
                 raise ValueError("parse_memory_state returned None")
@@ -254,4 +257,4 @@ class QwenVLMCognitive(BaseTracker):
 
 
 def get_tracker_class():
-    return QwenVLMCognitive
+    return VLMCognitive

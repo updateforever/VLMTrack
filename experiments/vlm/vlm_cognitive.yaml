@@ -1,0 +1,7 @@
+track_prompt: cognitive
+init_prompt: init_memory
+debug: 0
+use_keyframe: true
+checkpoint: null
+save_all_boxes: false
+

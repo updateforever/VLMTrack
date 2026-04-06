@@ -17,7 +17,7 @@ from lib.test.tracker.vlm_utils import parse_bbox_from_text, xyxy_to_xywh, draw_
 from lib.test.tracker.prompts import get_prompt
 
 
-class QwenVLMVisual(BaseTracker):
+class VLMVisual(BaseTracker):
     """
     纯视觉VLM跟踪器
 
@@ -76,7 +76,7 @@ class QwenVLMVisual(BaseTracker):
 
         if self.debug >= 2:
             env = env_settings()
-            vis_root = os.path.join(env.results_path, 'qwen_vlm_visual', 'vis')
+            vis_root = os.path.join(env.results_path, 'vlm_visual', 'vis')
             if self.run_tag:
                 self.vis_dir = os.path.join(vis_root, self.run_tag, self.seq_name)
             else:
@@ -164,4 +164,4 @@ class QwenVLMVisual(BaseTracker):
 
 
 def get_tracker_class():
-    return QwenVLMVisual
+    return VLMVisual

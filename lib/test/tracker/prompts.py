@@ -294,6 +294,99 @@ class CognitiveMosaicPrompt(PromptTemplate):
         )
 
 
+class CognitiveMosaicRefPrompt(PromptTemplate):
+    """
+    认知跟踪（Mosaic + Ref 版本）: 在文本中显式提供初始 GT 坐标锚点
+    """
+    def __init__(self):
+        super().__init__(
+            name="cognitive_mosaic_ref_tracking",
+            description="Tracking with historical frame mosaic + explicit init bbox reference"
+        )
+
+    def build(self,
+              memory_story: str = "",
+              language_description: str = "",
+              num_history_frames: int = 2,
+              init_bbox_1000=None) -> str:
+        return (
+            "# === TASK: Cognitive Visual Tracking ===\n\n"
+            "You are performing cognitive visual tracking - maintaining continuous awareness of a target object across video frames.\n\n"
+
+            "## Input Description\n\n"
+            "**Image 1 (Historical Reference Mosaic)** contains:\n"
+            "- **Initial Template (ANCHOR)**: Frame #0 with GREEN bounding box (ground truth annotation)\n"
+            "- **Historical Trajectory Reference**: Several historical frames with RED bounding boxes (predicted results, may contain errors)\n\n"
+            f"**Explicit Initial Anchor BBox** (Image-1 coordinates, normalized [0,999]): {init_bbox_1000}\n"
+            "Treat this bbox as authoritative anchor. It defines target identity.\n\n"
+            "**Image 2 (Current Frame)**: Where you need to locate the target\n\n"
+            f"**Long-term Memory (Narrative)**:\n{memory_story}\n\n"
+            f"**Initial Target Description** (optional):\n{language_description}\n\n"
+
+            "## Priority Rules (VERY IMPORTANT)\n"
+            "1. Frame #0 GREEN box + explicit anchor bbox are the ONLY authoritative identity anchors.\n"
+            "2. RED boxes are motion hints only; they may be wrong.\n"
+            "3. If anchor appearance conflicts with RED trajectory, trust anchor appearance.\n"
+            "4. Never switch to another similar object only because RED trajectory points there.\n\n"
+            "---\n\n"
+
+            "# === OUTPUT REQUIREMENTS ===\n\n"
+            "## 1. Current Frame Prediction\n\n"
+            "### Target Status (choose ONE option):\n"
+            "A. normal - Target clearly visible\n"
+            "B. partially_occluded - Target partially blocked but identifiable\n"
+            "C. fully_occluded - Target completely blocked but likely still in scene\n"
+            "D. out_of_view - Target moved outside frame boundaries\n"
+            "E. disappeared - Target vanished from scene\n"
+            "F. reappeared - Target returned after being absent\n\n"
+
+            "### Bounding Box:\n"
+            "- If visible or location inferable (A/B/C/F): Provide [x1, y1, x2, y2] in 0-1000 scale\n"
+            "- If completely unlocatable (D/E): Output [0, 0, 0, 0]\n\n"
+
+            "### Environment Status (select ALL applicable options):\n"
+            "A. normal\n"
+            "B. low_light\n"
+            "C. high_light\n"
+            "D. motion_blur\n"
+            "E. scene_change\n"
+            "F. viewpoint_change\n"
+            "G. scale_change\n"
+            "H. crowded\n"
+            "I. background_clutter\n\n"
+
+            "## 2. Tracking Evidence (Short-term Memory)\n"
+            "Explain your reasoning for this frame's prediction (2-4 sentences):\n"
+            "- What is the target and what is it doing?\n"
+            "- Why do you believe this is (or isn't) the target?\n"
+            "- Explicitly state how the anchor bbox supports your decision.\n\n"
+
+            "## 3. Confidence Score\n"
+            "Your confidence in the prediction (0.0-1.0, 0.1 granularity)\n\n"
+
+            "## 4. Long-term Memory Update (Narrative)\n"
+            "Update the story of target's journey (concise but complete):\n"
+            "- Describe target's appearance, motion trajectory, state changes\n"
+            "- Maintain narrative coherence\n"
+            "- Include predictions about future developments\n\n"
+
+            "# === OUTPUT FORMAT ===\n\n"
+            "{\n"
+            '  "target_status": "A",\n'
+            '  "environment_status": ["A"],\n'
+            '  "bbox": [x1, y1, x2, y2],\n'
+            '  "tracking_evidence": "The target is a red sedan moving right...",\n'
+            '  "confidence": 0.9,\n'
+            '  "memory_update": {\n'
+            '    "story": "A red sedan with white stripes traveling on an urban road..."\n'
+            "  }\n"
+            "}\n\n"
+            "HARD CONSTRAINTS:\n"
+            "- If prediction does not match Frame #0 anchor identity, output D or E with bbox [0,0,0,0] instead of forcing a wrong match.\n"
+            "- Do not use RED-box consistency alone as identity evidence.\n"
+        )
+
+
 # ==================== 初始记忆生成Prompt（改进版）====================
 
 class InitialMemoryPrompt(PromptTemplate):
@@ -307,15 +400,19 @@ class InitialMemoryPrompt(PromptTemplate):
             description="Generate initial semantic memory for tracking"
         )
 
-    def build(self) -> str:
+    def build(self, target_description: str = "") -> str:
         return (
             "# --- TASK ---\n"
             "Analyze the target object (GREEN box) and generate rich semantic memory "
             "to support long-term visual tracking.\n\n"
+            f"# --- TEXT PRIOR (OPTIONAL, from dataset) ---\n"
+            f"Target description hint: {target_description}\n"
+            "Use it as a soft prior for category/identity, but verify with visual evidence.\n\n"
 
             "# --- ANALYSIS GUIDE ---\n"
             "Focus on DISCRIMINATIVE features that help re-identify this target later:\n\n"
             "1. Appearance (most important):\n"
+            "   - First state target CATEGORY/IDENTITY explicitly (e.g., airplane, person, red sedan)\n"
             "   - Primary and secondary colors\n"
             "   - Shape and aspect ratio (tall/wide/square)\n"
             "   - Texture and surface pattern (solid, striped, spotted, metallic, etc.)\n"
@@ -332,7 +429,7 @@ class InitialMemoryPrompt(PromptTemplate):
             "# --- OUTPUT FORMAT ---\n"
             "Respond with ONLY this JSON (no markdown fence):\n"
             "{\n"
-            '  "appearance": "Detailed appearance description in English (colors, shape, texture, unique features)",\n'
+            '  "appearance": "Start with category/identity, then detailed appearance in English",\n'
             '  "motion": "Current motion state in English (moving/stationary, direction, speed)",\n'
             '  "context": "Scene context in English (environment type, nearby objects, position)"\n'
             "}\n\n"
@@ -342,6 +439,42 @@ class InitialMemoryPrompt(PromptTemplate):
             '  "appearance": "A red sedan with white side stripes, rectangular headlights, a roof rack, and a medium-sized body.",\n'
             '  "motion": "Moving to the right at a moderate speed in a mostly straight path.",\n'
             '  "context": "An urban road scene with nearby vehicles and buildings, with the target slightly right of center."\n'
+            "}\n"
+        )
+
+
+class InitialStoryMosaicPrompt(PromptTemplate):
+    """
+    Mosaic 专用初始化记忆：输出简洁且可持续更新的故事记忆。
+    """
+    def __init__(self):
+        super().__init__(
+            name="initial_story_mosaic",
+            description="Generate concise initial trajectory story for mosaic tracking"
+        )
+
+    def build(self, target_description: str = "") -> str:
+        return (
+            "# --- TASK ---\n"
+            "Initialize long-term story memory for future visual tracking.\n"
+            "This is NOT generic captioning. Focus on identity anchor and track-relevant cues.\n\n"
+
+            "# --- INPUT ---\n"
+            "You receive one image with GREEN GT box (authoritative target instance).\n"
+            f"Optional text hint: {target_description}\n\n"
+
+            "# --- WRITING RULES ---\n"
+            "1) Be concise and precise: 2-3 sentences only.\n"
+            "2) First sentence must state target category/identity explicitly if inferable (e.g., airplane/person/car).\n"
+            "3) Include 2-3 discriminative cues for re-identification.\n"
+            "4) Include scene relation and likely tracking risks (occlusion/scale/viewpoint/background clutter).\n"
+            "5) Avoid vague wording like 'small rectangular object' when category is inferable.\n"
+            "6) Use text hint only as soft prior; visual evidence has priority.\n\n"
+
+            "# --- OUTPUT FORMAT ---\n"
+            "Respond with ONLY this JSON:\n"
+            "{\n"
+            '  "init_story": "2-3 concise sentences for long-term tracking memory."\n'
             "}\n"
         )
 
@@ -359,9 +492,11 @@ class PromptManager:
         "three_image": ThreeImageTrackingPrompt(),
         "cognitive": CognitiveTrackingPrompt(),  # 认知跟踪（统一框架）
         "cognitive_mosaic": CognitiveMosaicPrompt(),  # 认知跟踪（Mosaic 版本）
+        "cognitive_mosaic_ref": CognitiveMosaicRefPrompt(),  # 认知跟踪（Mosaic + 坐标锚点）
 
         # 辅助prompt
         "init_memory": InitialMemoryPrompt(),
+        "init_story_mosaic": InitialStoryMosaicPrompt(),
     }
 
     @classmethod
@@ -375,7 +510,9 @@ class PromptManager:
                 - "three_image": 三图跟踪
                 - "cognitive": 认知跟踪
                 - "cognitive_mosaic": 认知跟踪（Mosaic 版本）
+                - "cognitive_mosaic_ref": 认知跟踪（Mosaic + 坐标锚点）
                 - "init_memory": 初始记忆生成
+                - "init_story_mosaic": Mosaic专用初始故事记忆
 
         Returns:
             PromptTemplate实例

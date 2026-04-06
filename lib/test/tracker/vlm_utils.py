@@ -289,6 +289,28 @@ def parse_memory_state(text: str) -> Optional[dict]:
     return None
 
 
+def parse_init_story(text: str) -> Optional[str]:
+    """
+    解析 Mosaic 初始化故事记忆。
+
+    支持格式:
+      {"init_story": "..."}
+      {"story": "..."}
+    """
+    try:
+        t = strip_code_fence(text)
+        data = json.loads(t)
+        if isinstance(data, dict):
+            story = data.get("init_story", "") or data.get("story", "")
+            if isinstance(story, str):
+                story = story.strip()
+                if story:
+                    return story
+    except Exception:
+        pass
+    return None
+
+
 # ============== 认知跟踪输出解析 ==============
 
 def parse_cognitive_output(text: str, img_width: int, img_height: int) -> Optional[dict]:

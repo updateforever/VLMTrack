@@ -1,0 +1,8 @@
+track_prompt: cognitive_mosaic
+init_prompt: init_story_mosaic
+history_buffer_size: 3
+sample_interval: 30
+debug: 0
+use_keyframe: true
+checkpoint: null
+save_all_boxes: false

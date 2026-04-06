@@ -1,5 +1,5 @@
 """
-Parameters for QwenVLMHybrid - 混合跟踪器
+Parameters for VLMHybrid - 混合跟踪器
 
 yaml_name 后缀约定:
     {model}_{vlm_mode}_{trigger}
@@ -16,8 +16,8 @@ yaml_name 后缀约定:
     local_4b_visual_kf       → 本地4B, Visual VLM, 关键帧触发
 
 使用方法:
-    python tracking/test.py qwen_vlm_hybrid default_visual_kf   --dataset_name lasot
-    python tracking/test.py qwen_vlm_hybrid default_cognitive_conf --dataset_name lasot
+    python tracking/test.py vlm_hybrid default_visual_kf   --dataset_name lasot
+    python tracking/test.py vlm_hybrid default_cognitive_conf --dataset_name lasot
 """
 from lib.test.utils import TrackerParams
 from lib.test.evaluation.environment import env_settings

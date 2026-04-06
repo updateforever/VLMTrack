@@ -20,7 +20,7 @@ from typing import List, Dict, Optional, Tuple
 from lib.test.tracker.vlm_engine import VLMEngine
 from lib.test.tracker.vlm_utils import (
     parse_mosaic_output, xyxy_to_xywh, draw_bbox,
-    parse_memory_state
+    parse_memory_state, parse_init_story
 )
 from lib.test.tracker.prompts import get_prompt
 
@@ -28,7 +28,7 @@ from lib.test.tracker.prompts import get_prompt
 _EMPTY_MEMORY = {"story": "", "last_update": 0}
 
 
-class QwenVLMCognitiveMosaic(BaseTracker):
+class VLMCognitiveMosaic(BaseTracker):
     """
     认知VLM跟踪器（Mosaic 版本）
 
@@ -69,10 +69,10 @@ class QwenVLMCognitiveMosaic(BaseTracker):
         self.prev_frame: Optional[Tuple] = None  # (image, bbox, status)
 
         # 配置
-        self.buffer_size = getattr(params, 'history_buffer_size', 2)
+        self.buffer_size = getattr(params, 'history_buffer_size', 3)
         self.sample_interval = getattr(params, 'sample_interval', 30)
         self.track_prompt = getattr(params, 'track_prompt', 'cognitive_mosaic')
-        self.init_prompt = getattr(params, 'init_prompt', 'init_memory')
+        self.init_prompt = getattr(params, 'init_prompt', 'init_story_mosaic')
         self.debug = getattr(params, 'debug', 0)
 
         self.frame_id = 0
@@ -98,7 +98,7 @@ class QwenVLMCognitiveMosaic(BaseTracker):
 
         if self.debug >= 2:
             env = env_settings()
-            vis_root = os.path.join(env.results_path, 'qwen_vlm_cognitive_mosaic', 'vis')
+            vis_root = os.path.join(env.results_path, 'vlm_cognitive_mosaic', 'vis')
             if self.run_tag:
                 self.vis_dir = os.path.join(vis_root, self.run_tag, self.seq_name)
             else:
@@ -112,17 +112,27 @@ class QwenVLMCognitiveMosaic(BaseTracker):
     def _generate_initial_memory(self, image: np.ndarray, bbox: List[float]):
         """调用VLM生成初始语义记忆（叙事形式）"""
         img_with_box = draw_bbox(image, bbox, color=(0, 255, 0))
-        prompt = get_prompt(self.init_prompt)
+        prompt = get_prompt(self.init_prompt, target_description=self.language_description)
 
         try:
             output = self.vlm.infer([img_with_box], prompt)
-            parsed = parse_memory_state(output)
-            if parsed and 'appearance' in parsed:
-                # 将旧格式转为叙事格式
-                story = f"{parsed['appearance']}. {parsed.get('motion', '')}. {parsed.get('context', '')}"
-                self.memory = {"story": story.strip(), "last_update": 0}
+
+            # 1) Mosaic 专用初始化：优先解析 init_story/story
+            story = parse_init_story(output)
+
+            # 2) 兼容旧格式：appearance/motion/context -> story
+            if not story:
+                parsed = parse_memory_state(output)
+                if parsed and 'appearance' in parsed:
+                    desc = (self.language_description or "").strip()
+                    if desc and desc.lower() not in ("the target object", "target object"):
+                        parsed['appearance'] = f"{desc}; {parsed.get('appearance', '')}".strip("; ")
+                    story = f"{parsed['appearance']}. {parsed.get('motion', '')}. {parsed.get('context', '')}".strip()
+
+            if story:
+                self.memory = {"story": story, "last_update": 0}
             else:
-                raise ValueError("parse_memory_state returned None")
+                raise ValueError("cannot parse init story from output")
         except Exception as e:
             if self.debug >= 1:
                 print(f"[CognitiveMosaic] Memory init failed ({e}), using description fallback")
@@ -210,7 +220,12 @@ class QwenVLMCognitiveMosaic(BaseTracker):
 
     def track(self, image, info: dict = None):
         """认知跟踪（Mosaic 版本）"""
-        self.frame_id += 1
+        # 关键帧模式下 track() 只在关键帧调用，不能用“调用次数”当帧号。
+        # 优先使用外部传入的真实序列帧号（running.py 中的 frame_num）。
+        if info is not None and 'frame_num' in info:
+            self.frame_id = int(info['frame_num'])
+        else:
+            self.frame_id += 1
         H, W = image.shape[:2]
 
         try:
@@ -245,12 +260,25 @@ class QwenVLMCognitiveMosaic(BaseTracker):
             #     print(f"  Frame #{i}: fid={fid}, bbox={bbox}, status={status}, is_gt={is_gt}")
 
             # 2. VLM 推理
-            prompt = get_prompt(
-                self.track_prompt,
+            prompt_kwargs = dict(
                 memory_story=self.memory['story'],
                 language_description=self.language_description,
-                num_history_frames=len(self.history_buffer)
+                num_history_frames=len(self.history_buffer),
             )
+
+            # 消融选项：在 prompt 中显式写入初始 GT 框坐标（归一化到 [0, 999]）
+            if getattr(self.params, 'use_init_bbox_ref', False) and self.init_frame is not None:
+                ix, iy, iw, ih = self.init_frame[1]
+                h0, w0 = self.init_frame[0].shape[:2]
+                init_bbox_1000 = [
+                    int(max(0, min(999, ix / w0 * 1000))),
+                    int(max(0, min(999, iy / h0 * 1000))),
+                    int(max(0, min(999, (ix + iw) / w0 * 1000))),
+                    int(max(0, min(999, (iy + ih) / h0 * 1000))),
+                ]
+                prompt_kwargs['init_bbox_1000'] = init_bbox_1000
+
+            prompt = get_prompt(self.track_prompt, **prompt_kwargs)
 
             output = self.vlm.infer([mosaic, image], prompt)
 
@@ -356,14 +384,12 @@ class QwenVLMCognitiveMosaic(BaseTracker):
         else:
             result_img = current.copy()
 
-        # mosaic 是 RGB 格式，转为 BGR 与 current 保持一致
-        mosaic_bgr = cv2.cvtColor(mosaic, cv2.COLOR_RGB2BGR)
-
+        # mosaic/current/result_img 都按 RGB 处理，写盘前再统一转 BGR
         # 调整 mosaic 高度与 current 一致
         h_cur = current.shape[0]
-        h_mos, w_mos = mosaic_bgr.shape[:2]
+        h_mos, w_mos = mosaic.shape[:2]
         scale = h_cur / h_mos
-        mosaic_resized = cv2.resize(mosaic_bgr, (int(w_mos * scale), h_cur))
+        mosaic_resized = cv2.resize(mosaic, (int(w_mos * scale), h_cur))
 
         combined = np.hstack([mosaic_resized, result_img])
         _, w = combined.shape[:2]
@@ -378,12 +404,12 @@ class QwenVLMCognitiveMosaic(BaseTracker):
                    (8, 76), font, sc, (0, 0, 0), 1)
         evidence = result['tracking_evidence'][:100]
         cv2.putText(pad, f"Evidence: {evidence}",
-                   (8, 102), font, sc, (0, 0, 255), 1)
+                   (8, 102), font, sc, (255, 0, 0), 1)
 
         final = np.vstack([combined, pad])
         save_path = os.path.join(self.vis_dir, f"{self.frame_id:06d}.jpg")
-        cv2.imwrite(save_path, final)
+        cv2.imwrite(save_path, cv2.cvtColor(final, cv2.COLOR_RGB2BGR))
 
 
 def get_tracker_class():
-    return QwenVLMCognitiveMosaic
+    return VLMCognitiveMosaic

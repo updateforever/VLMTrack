@@ -41,7 +41,7 @@ from lib.utils.box_ops import clip_box
 from lib.test.utils.hann import hann2d
 
 
-class QwenVLMHybrid(BaseTracker):
+class VLMHybrid(BaseTracker):
     """
     混合VLM跟踪器
 
@@ -185,11 +185,14 @@ class QwenVLMHybrid(BaseTracker):
     def _generate_initial_memory(self, image, bbox):
         """Cognitive模式：生成初始语义记忆，使用parse_memory_state统一解析"""
         img_with_box = draw_bbox(image, bbox, color=(0, 255, 0))
-        prompt = get_prompt(self.init_prompt)
+        prompt = get_prompt(self.init_prompt, target_description=self.language_description)
         try:
             output = self.vlm.infer([img_with_box], prompt)
             parsed = parse_memory_state(output)
             if parsed:
+                desc = (self.language_description or "").strip()
+                if desc and desc.lower() not in ("the target object", "target object"):
+                    parsed['appearance'] = f"{desc}; {parsed.get('appearance', '')}".strip("; ")
                 self.memory = {**parsed, "last_update": 0}
             else:
                 raise ValueError("parse_memory_state returned None")
@@ -403,4 +406,4 @@ class QwenVLMHybrid(BaseTracker):
 
 
 def get_tracker_class():
-    return QwenVLMHybrid
+    return VLMHybrid
