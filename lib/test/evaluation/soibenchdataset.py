@@ -22,9 +22,13 @@ class SOIBenchDataset(BaseDataset):
     
     def __init__(self):
         super().__init__()
-        
-        # 请根据您的实际环境修改 root_path
-        root_path = "/home/member/data2/wyp/SUTrack/SOIBench/data/test" 
+
+        # SOIBench 标注根目录（在 lib/test/evaluation/local.py 里统一维护）
+        root_path = getattr(
+            self.env_settings,
+            'soi_bench_path',
+            '/root/user-data/PUBLIC_DATASETS/SOIBench/test_anno'
+        )
         
         self.dataset_loaders = {
             'lasot': {

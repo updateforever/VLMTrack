@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
 # =========================
 # 基本配置
 # =========================
 # export DASHSCOPE_API_KEY='sk-61547e720ce8407aa44f4511051903b0'
 # 或者提前在 ~/.bashrc 里 export，这里就可以删掉这一行
 
-PY_SCRIPT="SOIBench/vlms/run_grounding_qwen3vl.py"
+PY_SCRIPT="${REPO_ROOT}/SOIBench/vlms/run_grounding_qwen3vl.py"
 
-OUTPUT_ROOT="/home/member/data2/wyp/SOT/VLMTrack/SOIBench/results"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/SOIBench/results}"
 EXP_TAG="qwen3-vl-32b-instruct"
 
 LOG_DIR="${OUTPUT_ROOT}/logs"

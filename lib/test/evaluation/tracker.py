@@ -113,6 +113,12 @@ class Tracker:
             output['all_boxes'] = []
             output['all_scores'] = []
 
+        # VLM 跟踪器额外保存元数据
+        vlm_trackers = ['vlm_cognitive', 'vlm_cognitive_mosaic', 'vlm_visual', 'vlm_hybrid']
+        save_vlm_metadata = self.name in vlm_trackers
+        if save_vlm_metadata:
+            output['vlm_metadata'] = []
+
         def _store_outputs(tracker_out: dict, defaults=None):
             defaults = {} if defaults is None else defaults
             for key in output.keys():

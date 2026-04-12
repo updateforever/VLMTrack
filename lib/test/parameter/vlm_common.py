@@ -166,6 +166,11 @@ API_MODEL_ALIASES = {
     # ---- 历史兼容 ----
     'qwen_vl_max': 'qwen-vl-max',
     'qwen_vl_plus': 'qwen-vl-plus',
+    # ---- local vLLM served models ----
+    'vllm_qwen25_vl_32b': 'qwen2.5-vl-32b-instruct',
+    'vllm_qwen25_vl_7b': 'qwen2.5-vl-7b-instruct',
+    'vllm_qwen3_vl_4b_thinking': 'qwen3-vl-4b-thinking',
+    'vllm_qwen35_9b': 'qwen3.5-9b',
 }
 
 # 官方模型 id 白名单（允许直接写 api_<官方id>）
@@ -183,6 +188,24 @@ API_MODEL_IDS = sorted(set(API_MODEL_ALIASES.values()) | {
 })
 
 _API_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+_LOCAL_VLLM_BASE_URL = os.environ.get('LOCAL_VLLM_BASE_URL', 'http://127.0.0.1:8000/v1')
+_LOCAL_VLLM_API_KEY = os.environ.get('LOCAL_VLLM_API_KEY', 'local-test-key')
+
+
+def _resolve_api_endpoint(alias: str, api_model: str):
+    """Select remote DashScope or local vLLM endpoint based on alias/model."""
+    alias = (alias or '').strip().lower()
+    model_lc = (api_model or '').strip().lower()
+    if alias.startswith('vllm_') or model_lc in {
+        'qwen2.5-vl-32b-instruct',
+        'qwen2.5-vl-7b-instruct',
+        'qwen3-vl-4b-thinking',
+        'qwen3.5-9b',
+    } and os.environ.get('LOCAL_VLLM_BASE_URL'):
+        return _LOCAL_VLLM_BASE_URL, _LOCAL_VLLM_API_KEY
+    if alias.startswith('vllm_'):
+        return _LOCAL_VLLM_BASE_URL, _LOCAL_VLLM_API_KEY
+    return _API_BASE_URL, os.environ.get('DASHSCOPE_API_KEY', '')
 
 
 def _local_model_keys():
@@ -331,8 +354,7 @@ def apply_vlm_config(params, yaml_name: str, strict: bool = True):
 
         params.mode = 'api'
         params.api_model = api_model
-        params.api_base_url = _API_BASE_URL
-        params.api_key = os.environ.get('DASHSCOPE_API_KEY', '')
+        params.api_base_url, params.api_key = _resolve_api_endpoint(alias, api_model)
         return extras
 
     # Local / default 分支

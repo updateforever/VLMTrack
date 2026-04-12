@@ -20,12 +20,12 @@ from typing import List, Dict, Optional, Tuple
 from lib.test.tracker.vlm_engine import VLMEngine
 from lib.test.tracker.vlm_utils import (
     parse_mosaic_output, xyxy_to_xywh, draw_bbox,
-    parse_memory_state, parse_init_story
+    parse_memory_state, parse_init_cognition
 )
 from lib.test.tracker.prompts import get_prompt
 
-# 默认记忆结构（简化为单一 story）
-_EMPTY_MEMORY = {"story": "", "last_update": 0}
+# 默认记忆结构（简化为单一 cognition_chain）
+_EMPTY_MEMORY = {"cognition_chain": "", "last_update": 0}
 
 
 class VLMCognitiveMosaic(BaseTracker):
@@ -54,13 +54,13 @@ class VLMCognitiveMosaic(BaseTracker):
         self.state: Optional[List[float]] = None
         self.language_description: str = "the target object"
 
-        # 语义记忆库（叙事形式）
+        # 语义记忆库（认知推理链）
         self.memory: Dict = dict(_EMPTY_MEMORY)
 
         # 认知跟踪状态
         self.target_status: str = "A"  # 选项格式
         self.environment_status: List[str] = ["A"]
-        self.tracking_evidence: str = ""
+        self.cognition_chain: str = ""
         self.tracking_history: List[Dict] = []
 
         # Mosaic 专用：历史帧管理
@@ -72,7 +72,7 @@ class VLMCognitiveMosaic(BaseTracker):
         self.buffer_size = getattr(params, 'history_buffer_size', 3)
         self.sample_interval = getattr(params, 'sample_interval', 30)
         self.track_prompt = getattr(params, 'track_prompt', 'cognitive_mosaic')
-        self.init_prompt = getattr(params, 'init_prompt', 'init_story_mosaic')
+        self.init_prompt = getattr(params, 'init_prompt', 'init_cognition_mosaic')
         self.debug = getattr(params, 'debug', 0)
 
         self.frame_id = 0
@@ -80,7 +80,7 @@ class VLMCognitiveMosaic(BaseTracker):
         self.vis_dir = None
 
     def initialize(self, image, info: dict):
-        """初始化 - 生成初始语义记忆并保存初始帧"""
+        """初始化 - 生成初始认知结果并保存初始帧"""
         self.frame_id = 0
         self.state = list(info['init_bbox'])
 
@@ -93,7 +93,7 @@ class VLMCognitiveMosaic(BaseTracker):
         self.init_frame = (image.copy(), list(info['init_bbox']), "normal")
         self.prev_frame = (image.copy(), list(info['init_bbox']), "normal")
 
-        # 生成初始记忆（叙事）
+        # 生成初始认知
         self._generate_initial_memory(image, self.state)
 
         if self.debug >= 2:
@@ -110,34 +110,34 @@ class VLMCognitiveMosaic(BaseTracker):
                   f"buffer_size={self.buffer_size}, sample_interval={self.sample_interval}")
 
     def _generate_initial_memory(self, image: np.ndarray, bbox: List[float]):
-        """调用VLM生成初始语义记忆（叙事形式）"""
+        """调用VLM生成初始认知结果"""
         img_with_box = draw_bbox(image, bbox, color=(0, 255, 0))
         prompt = get_prompt(self.init_prompt, target_description=self.language_description)
 
         try:
             output = self.vlm.infer([img_with_box], prompt)
 
-            # 1) Mosaic 专用初始化：优先解析 init_story/story
-            story = parse_init_story(output)
+            # 1) Mosaic 专用初始化：优先解析 init_cognition
+            cognition = parse_init_cognition(output)
 
-            # 2) 兼容旧格式：appearance/motion/context -> story
-            if not story:
+            # 2) 兼容旧格式：appearance/motion/context -> cognition_chain
+            if not cognition:
                 parsed = parse_memory_state(output)
                 if parsed and 'appearance' in parsed:
                     desc = (self.language_description or "").strip()
                     if desc and desc.lower() not in ("the target object", "target object"):
                         parsed['appearance'] = f"{desc}; {parsed.get('appearance', '')}".strip("; ")
-                    story = f"{parsed['appearance']}. {parsed.get('motion', '')}. {parsed.get('context', '')}".strip()
+                    cognition = f"{parsed['appearance']}. {parsed.get('motion', '')}. {parsed.get('context', '')}".strip()
 
-            if story:
-                self.memory = {"story": story, "last_update": 0}
+            if cognition:
+                self.memory = {"cognition_chain": cognition, "last_update": 0}
             else:
-                raise ValueError("cannot parse init story from output")
+                raise ValueError("cannot parse init cognition from output")
         except Exception as e:
             if self.debug >= 1:
                 print(f"[CognitiveMosaic] Memory init failed ({e}), using description fallback")
             self.memory = {
-                "story": f"The target is {self.language_description}.",
+                "cognition_chain": f"The target is {self.language_description}.",
                 "last_update": 0
             }
 
@@ -261,7 +261,7 @@ class VLMCognitiveMosaic(BaseTracker):
 
             # 2. VLM 推理
             prompt_kwargs = dict(
-                memory_story=self.memory['story'],
+                memory_cognition=self.memory['cognition_chain'],
                 language_description=self.language_description,
                 num_history_frames=len(self.history_buffer),
             )
@@ -296,42 +296,42 @@ class VLMCognitiveMosaic(BaseTracker):
                     print(f"  Status: {result['target_status']}")
                     print(f"  Environment: {result['environment_status']}")
                     print(f"  Confidence: {result['confidence']:.2f}")
-                    print(f"  Evidence: {result['tracking_evidence'][:80]}...")
+                    print(f"  Cognition: {result['cognition_chain'][:80]}...")
 
                 # 更新状态
                 self.state = result['bbox']
                 self.target_status = result['target_status']
                 self.environment_status = result['environment_status']
-                self.tracking_evidence = result['tracking_evidence']
+                self.cognition_chain = result['cognition_chain']
 
                 # 4. 更新历史帧策略
                 # 上一帧：始终更新（包括失败案例）
                 self.prev_frame = (image.copy(), result['bbox'], result['target_status'])
 
-                # 历史帧：保存所有状态的帧（包括目标消失），提升模型鲁棒性
-                # 判断是否应该保存到历史缓冲区
-                should_save = False
-                is_kf = info and info.get('is_keyframe', False)
+                # 历史帧：只保存目标可见的帧（有有效 bbox 的），确保 mosaic 有视觉参考价值
+                # 目标消失帧（out_of_view/disappeared）没有 bbox，放进历史缓冲只会浪费位置
+                target_visible = result['target_status'] in ('normal', 'partially_occluded', 'reappeared') and result['bbox'] != [0, 0, 0, 0]
 
-                if is_kf:
-                    # 关键帧模式：直接保存
-                    should_save = True
-                else:
-                    # 非关键帧模式：基于时间跨度判断
-                    if not self.history_buffer:
-                        should_save = True  # 缓冲区为空，直接保存
+                if target_visible:
+                    should_save = False
+                    is_kf = info and info.get('is_keyframe', False)
+
+                    if is_kf:
+                        should_save = True
+                    elif not self.history_buffer:
+                        should_save = True
                     else:
                         last_frame_id = self.history_buffer[-1][0]
                         if self.frame_id - last_frame_id >= self.sample_interval:
                             should_save = True
 
-                if should_save:
-                    self.history_buffer.append((
-                        self.frame_id, image.copy(), result['bbox'], result['target_status']
-                    ))
-                    # FIFO 队列
-                    if len(self.history_buffer) > self.buffer_size:
-                        self.history_buffer.pop(0)
+                    if should_save:
+                        self.history_buffer.append((
+                            self.frame_id, image.copy(), result['bbox'], result['target_status']
+                        ))
+                        # FIFO 队列
+                        if len(self.history_buffer) > self.buffer_size:
+                            self.history_buffer.pop(0)
 
                 # 保存跟踪历史
                 self.tracking_history.append({
@@ -340,29 +340,42 @@ class VLMCognitiveMosaic(BaseTracker):
                     'environment_status': result['environment_status'],
                     'bbox': result['bbox'],
                     'confidence': result['confidence'],
-                    'tracking_evidence': result['tracking_evidence']
+                    'cognition_chain': result['cognition_chain']
                 })
 
-                # 更新语义记忆（叙事）
-                if 'memory_update' in result and 'story' in result['memory_update']:
+                # 当前认知推理链既是证据，也是后续帧的记忆输入
+                if result['cognition_chain']:
                     self.memory = {
-                        "story": result['memory_update']['story'],
+                        "cognition_chain": result['cognition_chain'],
                         "last_update": self.frame_id
                     }
 
                 if self.debug >= 2:
                     self._save_vis(mosaic, image, result)
 
+                # 保存当前帧的完整结果（用于返回）
+                current_result = result
+
             else:
                 # Parse失败
                 if self.debug >= 1:
                     print(f"[CognitiveMosaic] Frame {self.frame_id}: Parse failed, marking as absent")
                 self.state = [0, 0, 0, 0]
-                self.target_status = "disappeared"
-                self.environment_status = ["normal"]
+                self.target_status = "E"  # disappeared
+                self.environment_status = ["A"]
+                self.cognition_chain = ""
 
                 # 上一帧仍然更新
-                self.prev_frame = (image.copy(), [0, 0, 0, 0], "disappeared")
+                self.prev_frame = (image.copy(), [0, 0, 0, 0], "E")
+
+                # 保存失败结果
+                current_result = {
+                    'bbox': [0, 0, 0, 0],
+                    'target_status': 'E',
+                    'environment_status': ['A'],
+                    'cognition_chain': '',
+                    'confidence': 0.0
+                }
 
         except Exception as e:
             if self.debug >= 1:
@@ -370,11 +383,34 @@ class VLMCognitiveMosaic(BaseTracker):
             import traceback
             traceback.print_exc()
             self.state = [0, 0, 0, 0]
+            self.target_status = "E"
+            self.environment_status = ["A"]
+            self.cognition_chain = ""
 
-        return {"target_bbox": self.state}
+            # 保存错误结果
+            current_result = {
+                'bbox': [0, 0, 0, 0],
+                'target_status': 'E',
+                'environment_status': ['A'],
+                'cognition_chain': '',
+                'confidence': 0.0
+            }
+
+        # 返回完整跟踪数据（用于保存）
+        out = {"target_bbox": self.state}
+
+        # 附加 VLM 元数据
+        out['vlm_metadata'] = {
+            'target_status': current_result.get('target_status', 'E'),
+            'environment_status': current_result.get('environment_status', ['A']),
+            'cognition_chain': current_result.get('cognition_chain', ''),
+            'confidence': float(current_result.get('confidence', 0.0))
+        }
+
+        return out
 
     def _save_vis(self, mosaic: np.ndarray, current: np.ndarray, result: dict):
-        """保存可视化"""
+        """保存可视化（增强版：叠加认知链文本）"""
         if not self.vis_dir:
             return
 
@@ -391,7 +427,70 @@ class VLMCognitiveMosaic(BaseTracker):
         scale = h_cur / h_mos
         mosaic_resized = cv2.resize(mosaic, (int(w_mos * scale), h_cur))
 
-        combined = np.hstack([mosaic_resized, result_img])
+        # 拼接上半部分：mosaic | result_img
+        combined_top = np.hstack([mosaic_resized, result_img])
+
+        # ========== 增强：添加文本信息面板 ==========
+        # 创建文本面板（宽度匹配 combined_top）
+        panel_height = 180
+        panel_width = combined_top.shape[1]  # 修复：使用 combined_top 的宽度
+        text_panel = np.ones((panel_height, panel_width, 3), dtype=np.uint8) * 240
+
+        # 状态映射
+        status_map = {
+            'A': 'normal', 'B': 'partially_occluded', 'C': 'fully_occluded',
+            'D': 'out_of_view', 'E': 'disappeared', 'F': 'reappeared'
+        }
+        env_map = {
+            'A': 'normal', 'B': 'low_light', 'C': 'high_light', 'D': 'motion_blur',
+            'E': 'scene_change', 'F': 'viewpoint_change', 'G': 'scale_change',
+            'H': 'crowded', 'I': 'background_clutter'
+        }
+
+        # 解析状态
+        target_status = result.get('target_status', 'A')
+        target_status_text = status_map.get(target_status, target_status)
+        env_status = result.get('environment_status', ['A'])
+        env_status_text = [env_map.get(e, e) for e in env_status]
+        confidence = result.get('confidence', 0.0)
+
+        # 第1行：帧号和状态
+        line1 = f"Frame {self.frame_id}  |  Status: {target_status}-{target_status_text}  |  Conf: {confidence:.2f}"
+        cv2.putText(text_panel, line1, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+
+        # 第2行：环境状态
+        line2 = f"Environment: {', '.join(env_status_text)}"
+        cv2.putText(text_panel, line2, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (60, 60, 60), 1)
+
+        # 第3-6行：认知链（自动换行）
+        cognition = result.get('cognition_chain', '')
+        cv2.putText(text_panel, "Cognition Chain:", (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
+        # 简单的文本换行（按字符数）
+        max_chars_per_line = int(panel_width / 8)  # 根据面板宽度动态计算
+        words = cognition.split()
+        lines = []
+        current_line = ""
+        for word in words:
+            if len(current_line) + len(word) + 1 <= max_chars_per_line:
+                current_line += word + " "
+            else:
+                lines.append(current_line.strip())
+                current_line = word + " "
+        if current_line:
+            lines.append(current_line.strip())
+
+        # 最多显示3行
+        for i, line in enumerate(lines[:3]):
+            cv2.putText(text_panel, line, (10, 100 + i * 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (40, 40, 40), 1)
+
+        # 如果文本太长，显示省略号
+        if len(lines) > 3:
+            cv2.putText(text_panel, "...", (10, 175), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 100, 100), 1)
+
+        # 拼接：上半部分 + 文本面板（垂直）
+        combined = np.vstack([combined_top, text_panel])
+        # ==========================================
         _, w = combined.shape[:2]
         pad = np.ones((120, w, 3), dtype=np.uint8) * 255
         font, sc = cv2.FONT_HERSHEY_SIMPLEX, 0.4
@@ -402,8 +501,8 @@ class VLMCognitiveMosaic(BaseTracker):
                    (8, 50), font, sc, (0, 0, 0), 1)
         cv2.putText(pad, f"Confidence: {result['confidence']:.2f}",
                    (8, 76), font, sc, (0, 0, 0), 1)
-        evidence = result['tracking_evidence'][:100]
-        cv2.putText(pad, f"Evidence: {evidence}",
+        cognition = result['cognition_chain'][:100]
+        cv2.putText(pad, f"Cognition: {cognition}",
                    (8, 102), font, sc, (255, 0, 0), 1)
 
         final = np.vstack([combined, pad])

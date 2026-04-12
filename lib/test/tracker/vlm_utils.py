@@ -289,11 +289,12 @@ def parse_memory_state(text: str) -> Optional[dict]:
     return None
 
 
-def parse_init_story(text: str) -> Optional[str]:
+def parse_init_cognition(text: str) -> Optional[str]:
     """
-    解析 Mosaic 初始化故事记忆。
+    解析 Mosaic 初始化认知结果。
 
     支持格式:
+      {"init_cognition": "..."}
       {"init_story": "..."}
       {"story": "..."}
     """
@@ -301,14 +302,23 @@ def parse_init_story(text: str) -> Optional[str]:
         t = strip_code_fence(text)
         data = json.loads(t)
         if isinstance(data, dict):
-            story = data.get("init_story", "") or data.get("story", "")
-            if isinstance(story, str):
-                story = story.strip()
-                if story:
-                    return story
+            cognition = (
+                data.get("init_cognition", "")
+                or data.get("init_story", "")
+                or data.get("story", "")
+            )
+            if isinstance(cognition, str):
+                cognition = cognition.strip()
+                if cognition:
+                    return cognition
     except Exception:
         pass
     return None
+
+
+def parse_init_story(text: str) -> Optional[str]:
+    """兼容旧调用，等价于 parse_init_cognition。"""
+    return parse_init_cognition(text)
 
 
 # ============== 认知跟踪输出解析 ==============
@@ -395,9 +405,8 @@ def parse_mosaic_output(text: str, img_width: int, img_height: int) -> Optional[
             'target_status': str,
             'environment_status': List[str],
             'bbox': List[float],  # XYWH format
-            'tracking_evidence': str,
-            'confidence': float,
-            'memory_update': dict  # {'story': str}
+            'cognition_chain': str,
+            'confidence': float
         } 或 None
     """
     # 选项映射
@@ -456,17 +465,24 @@ def parse_mosaic_output(text: str, img_width: int, img_height: int) -> Optional[
 
         bbox_xywh = xyxy_to_xywh(bbox_xyxy) if bbox_xyxy else [0, 0, 0, 0]
 
+        cognition_chain = data.get('cognition_chain', '')
+        if not isinstance(cognition_chain, str) or not cognition_chain.strip():
+            cognition_chain = data.get('tracking_evidence', '')
+
+        if (not isinstance(cognition_chain, str) or not cognition_chain.strip()) and \
+                isinstance(data.get('memory_update'), dict):
+            cognition_chain = (
+                data['memory_update'].get('cognition_chain', '')
+                or data['memory_update'].get('story', '')
+            )
+
         result = {
             'target_status': target_status,
             'environment_status': env_status,
             'bbox': bbox_xywh,
-            'tracking_evidence': data.get('tracking_evidence', ''),
+            'cognition_chain': cognition_chain if isinstance(cognition_chain, str) else '',
             'confidence': float(data.get('confidence', 0.5))
         }
-
-        # 提取 memory_update
-        if 'memory_update' in data and isinstance(data['memory_update'], dict):
-            result['memory_update'] = data['memory_update']
 
         return result
 

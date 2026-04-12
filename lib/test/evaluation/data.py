@@ -1,4 +1,4 @@
-import numpy as np
+ 
 from lib.test.evaluation.environment import env_settings
 from lib.train.data.image_loader import imread_indexed
 from collections import OrderedDict

@@ -39,6 +39,49 @@ from model_adapters import get_adapter
 _ADDITIONAL_COLORS = [name for (name, _) in ImageColor.colormap.items()]
 
 
+def _pick_existing(paths):
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _resolve_default_paths():
+    lasot_jsonl = _pick_existing([
+        os.environ.get('SOIBENCH_LASOT_JSONL'),
+        '/root/user-data/wyp/VLMTrack/SOIBench/data/test/lasot',
+        '/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot',
+    ]) or ''
+    mgit_jsonl = _pick_existing([
+        os.environ.get('SOIBENCH_MGIT_JSONL'),
+        '/root/user-data/wyp/VLMTrack/SOIBench/data/test/mgit',
+        '/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit',
+    ]) or ''
+    tnl2k_jsonl = _pick_existing([
+        os.environ.get('SOIBENCH_TNL2K_JSONL'),
+        '/root/user-data/wyp/VLMTrack/SOIBench/data/test/tnl2k',
+        '/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k',
+    ]) or ''
+
+    lasot_root = _pick_existing([
+        os.environ.get('LASOT_ROOT'),
+        '/root/user-data/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark',
+        '/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark',
+    ]) or ''
+    mgit_root = _pick_existing([
+        os.environ.get('MGIT_ROOT'),
+        '/root/user-data/DATASETS_PUBLIC/MGIT',
+        '/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/data/test',
+        '/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/MGIT-Test/data/test',
+    ]) or ''
+    tnl2k_root = _pick_existing([
+        os.environ.get('TNL2K_ROOT'),
+        '/root/user-data/DATASETS_PUBLIC/TNL2K/TNL2K_test_subset',
+        '/home/member/data1/DATASETS_PUBLIC/TNL2K_test/TNL2K_test_subset',
+    ]) or ''
+    return lasot_jsonl, mgit_jsonl, tnl2k_jsonl, lasot_root, mgit_root, tnl2k_root
+
+
 def plot_bounding_boxes(im: Image.Image, bboxes: List[List[float]], save_path: str):
     """在图上画 bbox"""
     if not bboxes:
@@ -242,6 +285,13 @@ def run_grounding_inference(
 # ============================================================================
 
 def main():
+    (default_lasot_jsonl,
+     default_mgit_jsonl,
+     default_tnl2k_jsonl,
+     default_lasot_root,
+     default_mgit_root,
+     default_tnl2k_root) = _resolve_default_paths()
+
     parser = argparse.ArgumentParser(
         description="SOIBench Grounding 推理统一入口",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -288,22 +338,22 @@ def main():
     
     # 数据集参数
     parser.add_argument("--lasot_jsonl", type=str,
-                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot",
+                        default=default_lasot_jsonl,
                         help="LaSOT JSONL 描述文件目录")
     parser.add_argument("--lasot_root", type=str,
-                        default="/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
+                        default=default_lasot_root,
                         help="LaSOT 图像根目录")
     parser.add_argument("--mgit_jsonl", type=str,
-                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit",
+                        default=default_mgit_jsonl,
                         help="MGIT JSONL 描述文件目录")
     parser.add_argument("--mgit_root", type=str,
-                        default="/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/data/test",
+                        default=default_mgit_root,
                         help="MGIT 图像根目录")
     parser.add_argument("--tnl2k_jsonl", type=str,
-                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k",
+                        default=default_tnl2k_jsonl,
                         help="TNL2K JSONL 描述文件目录")
     parser.add_argument("--tnl2k_root", type=str,
-                        default="/home/member/data1/DATASETS_PUBLIC/TNL2K_test/TNL2K_test_subset",
+                        default=default_tnl2k_root,
                         help="TNL2K 图像根目录")
     
     # 输出参数

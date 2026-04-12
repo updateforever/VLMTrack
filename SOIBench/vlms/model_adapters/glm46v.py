@@ -15,6 +15,20 @@ from .base import ModelAdapter
 # 推理引擎
 # ============================================================================
 
+def _pick_existing(paths):
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _default_glm_path():
+    return _pick_existing([
+        os.environ.get('GLM46V_MODEL_PATH'),
+        '/root/user-data/MODEL_WEIGHTS_PUBLIC/GLM-4.6V-Flash',
+        '/home/member/data1/MODEL_WEIGHTS_PUBLIC/GLM-4.6V-Flash/',
+    ])
+
 class GLM46VLocalEngine:
     """GLM-4.6V 本地推理引擎"""
     
@@ -244,7 +258,7 @@ class GLM46VAdapter(ModelAdapter):
             )
     
     def get_default_model_path(self) -> str:
-        return "/home/member/data1/MODEL_WEIGHTS_PUBLIC/GLM-4.6V-Flash/"
+        return _default_glm_path()
     
     def get_default_api_model_name(self) -> str:
         return "zai-org/GLM-4.6V"

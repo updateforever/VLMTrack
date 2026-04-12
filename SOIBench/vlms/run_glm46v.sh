@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
 # =========================
 # GLM-4.6V API 推理脚本 (硅基流动)
 # =========================
@@ -8,9 +11,9 @@ set -e
 # 设置 API Key (请替换为您的实际 API Key)
 export SILICONFLOW_API_KEY='your-siliconflow-api-key-here'
 
-PY_SCRIPT="SOIBench/vlms/run_grounding_glm46v.py"
+PY_SCRIPT="${REPO_ROOT}/SOIBench/vlms/run_grounding_glm46v.py"
 
-OUTPUT_ROOT="/home/member/data2/wyp/SOT/VLMTrack/SOIBench/results"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/SOIBench/results}"
 EXP_TAG="glm-4.6v-siliconflow"
 
 LOG_DIR="${OUTPUT_ROOT}/logs"

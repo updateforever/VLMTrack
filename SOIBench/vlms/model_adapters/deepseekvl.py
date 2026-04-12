@@ -17,12 +17,26 @@ from .base import ModelAdapter
 # 推理引擎
 # ============================================================================
 
+def _pick_existing(paths):
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _default_deepseek_path():
+    return _pick_existing([
+        os.environ.get('DEEPSEEKVL_MODEL_PATH'),
+        '/root/user-data/MODEL_WEIGHTS_PUBLIC/deepseek-vl2-small',
+        '/home/member/data1/MODEL_WEIGHTS_PUBLIC/deepseek-vl2-small/',
+    ])
+
 class DeepSeekVLLocalEngine:
     """DeepSeek-VL2 本地推理引擎"""
     
     def __init__(
         self,
-        model_path: str = "/home/member/data1/MODEL_WEIGHTS_PUBLIC/deepseek-vl2-small/",
+        model_path: str = None,
         device_map: str = "auto",
     ):
         import torch
@@ -30,6 +44,7 @@ class DeepSeekVLLocalEngine:
         from deepseek_vl.models import DeepseekVLV2Processor, DeepseekVLV2ForCausalLM
         from deepseek_vl.utils.io import load_pil_images
         
+        model_path = model_path or _default_deepseek_path()
         print(f"🚀 加载 DeepSeek-VL2 本地模型: {model_path}")
         
         self.vl_chat_processor = DeepseekVLV2Processor.from_pretrained(model_path)
@@ -254,7 +269,7 @@ class DeepSeekVLAdapter(ModelAdapter):
             )
     
     def get_default_model_path(self) -> str:
-        return "/home/member/data1/MODEL_WEIGHTS_PUBLIC/deepseek-vl2-small/"
+        return _default_deepseek_path()
     
     def get_default_api_model_name(self) -> str:
         return "deepseek-ai/deepseek-vl2"

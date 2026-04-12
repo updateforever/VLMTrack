@@ -19,3 +19,5 @@ SOIBench/eval_results/
 # VSCode debug configurations (use launch.json.example as template)
 .vscode/launch.json
 lib/test/evaluation/local.py
+
+SOIBench/

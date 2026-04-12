@@ -24,10 +24,30 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 from qwen3vl_infer import Qwen3VLLocalEngine, qwen3vl_api_chat
 
 
+def _pick_existing(paths):
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
 DATASET_IMAGE_ROOTS = {
-    "lasot": "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
-    "mgit":  "/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/MGIT-Test/data/test",
-    "tnl2k": "/home/member/data1/DATASETS_PUBLIC/TNL2K/TNL2K_CVPR2021/test"
+    "lasot": _pick_existing([
+        os.environ.get("LASOT_ROOT"),
+        "/root/user-data/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
+        "/home/member/data1/DATASETS_PUBLIC/LaSOT/LaSOTBenchmark",
+    ]) or "",
+    "mgit": _pick_existing([
+        os.environ.get("MGIT_ROOT"),
+        "/root/user-data/DATASETS_PUBLIC/MGIT",
+        "/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/data/test",
+        "/home/member/data1/DATASETS_PUBLIC/MGIT/VideoCube/MGIT-Test/data/test",
+    ]) or "",
+    "tnl2k": _pick_existing([
+        os.environ.get("TNL2K_ROOT"),
+        "/root/user-data/DATASETS_PUBLIC/TNL2K/TNL2K_test_subset",
+        "/home/member/data1/DATASETS_PUBLIC/TNL2K/TNL2K_CVPR2021/test",
+    ]) or "",
 }
 
 
@@ -308,6 +328,22 @@ def _count_lines(path: str) -> int:
 
 
 def main():
+    default_lasot_dir = _pick_existing([
+        os.environ.get("SOIBENCH_LASOT_JSONL"),
+        "/root/user-data/wyp/VLMTrack/SOIBench/data/test/lasot",
+        "/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot",
+    ]) or ""
+    default_mgit_dir = _pick_existing([
+        os.environ.get("SOIBENCH_MGIT_JSONL"),
+        "/root/user-data/wyp/VLMTrack/SOIBench/data/test/mgit",
+        "/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit",
+    ]) or ""
+    default_tnl2k_dir = _pick_existing([
+        os.environ.get("SOIBENCH_TNL2K_JSONL"),
+        "/root/user-data/wyp/VLMTrack/SOIBench/data/test/tnl2k",
+        "/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k",
+    ]) or ""
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--mode", type=str, default="local", choices=["local", "api"])
@@ -324,9 +360,9 @@ def main():
     parser.add_argument("--exp_tag", type=str, default="run")
     parser.add_argument("--save_debug_vis", action="store_true")
 
-    parser.add_argument("--lasot_dir", type=str, default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot")
-    parser.add_argument("--mgit_dir", type=str, default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit")
-    parser.add_argument("--tnl2k_dir", type=str, default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k")
+    parser.add_argument("--lasot_dir", type=str, default=default_lasot_dir)
+    parser.add_argument("--mgit_dir", type=str, default=default_mgit_dir)
+    parser.add_argument("--tnl2k_dir", type=str, default=default_tnl2k_dir)
 
     parser.add_argument("--output_root", type=str, default="./results")
 

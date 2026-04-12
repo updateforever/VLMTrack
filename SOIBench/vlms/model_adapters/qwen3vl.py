@@ -17,6 +17,12 @@ from .base import ModelAdapter
 # ============================================================================
 # 推理引擎
 # ============================================================================
+def _pick_existing(paths):
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
 
 class Qwen3VLLocalEngine:
     """Qwen3VL 本地推理引擎"""
@@ -288,7 +294,12 @@ class Qwen3VLAdapter(ModelAdapter):
             )
     
     def get_default_model_path(self) -> str:
-        return "/home/member/data1/MODEL_WEIGHTS_PUBLIC/Qwen3-VL-32B-Instruct/"
+        return _pick_existing([
+            os.environ.get('QWEN3VL_MODEL_PATH'),
+            '/root/user-data/MODEL_WEIGHTS_PUBLIC/MLLM_weights/Qwen3-VL-32B-Instruct',
+            '/root/user-data/MODEL_WEIGHTS_PUBLIC/Qwen3-VL-32B-Instruct',
+            '/home/member/data1/MODEL_WEIGHTS_PUBLIC/Qwen3-VL-32B-Instruct/',
+        ])
     
     def get_default_api_model_name(self) -> str:
         return "qwen3-vl-32b-instruct"

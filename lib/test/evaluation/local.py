@@ -45,6 +45,6 @@ def local_env_settings():
     settings.soi_bench_path = f'{data_root}/SOIBench/test_anno'
 
     # 固定关键帧索引路径
-    settings.keyframe_root = f'{data_root}/SOIBench/KeyFrame/scene_changes_resnet/top_10'
+    settings.keyframe_root = f'{data_root}/SOIBench/KeyFrame/scene_changes_clip/top_10'
 
     return settings

@@ -2,6 +2,7 @@ import numpy as np
 import multiprocessing
 import os
 import sys
+import json
 from itertools import product
 from collections import OrderedDict
 from lib.test.evaluation import Sequence, Tracker
@@ -49,6 +50,44 @@ def _save_tracker_output(seq: Sequence, tracker: Tracker, output: dict):
                 else:
                     data_dict[k] = [v, ]
         return data_dict
+
+    # ========== 保存 VLM 元数据（新增）==========
+    if 'vlm_metadata' in output and output['vlm_metadata']:
+        metadata_file = '{}_full.json'.format(base_results_path)
+
+        # 构建完整的跟踪数据结构
+        full_data = {
+            'sequence': seq.name,
+            'dataset': seq.dataset,
+            'tracker': tracker.name,
+            'parameter': tracker.parameter_name,
+            'frames': []
+        }
+
+        # 逐帧添加数据
+        for frame_id, (bbox, metadata) in enumerate(zip(output['target_bbox'], output['vlm_metadata'])):
+            frame_data = {
+                'frame_id': frame_id,
+                'bbox': bbox if isinstance(bbox, list) else bbox.tolist() if hasattr(bbox, 'tolist') else list(bbox)
+            }
+
+            # 添加 VLM 元数据
+            if metadata:
+                frame_data.update({
+                    'target_status': metadata.get('target_status', ''),
+                    'environment_status': metadata.get('environment_status', []),
+                    'cognition_chain': metadata.get('cognition_chain', ''),
+                    'confidence': float(metadata.get('confidence', 0.0))
+                })
+
+            full_data['frames'].append(frame_data)
+
+        # 保存为 JSON
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(full_data, f, indent=2, ensure_ascii=False)
+
+        print(f"Saved VLM metadata to {metadata_file}")
+    # ==========================================
 
     for key, data in output.items():
         # If data is empty

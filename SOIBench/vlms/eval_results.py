@@ -19,6 +19,32 @@ from prettytable import PrettyTable
 from tqdm import tqdm
 
 
+def _pick_existing(paths):
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _resolve_default_gt_roots():
+    lasot = _pick_existing([
+        os.environ.get('SOIBENCH_LASOT_JSONL'),
+        '/root/user-data/wyp/VLMTrack/SOIBench/data/test/lasot',
+        '/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot',
+    ]) or ''
+    mgit = _pick_existing([
+        os.environ.get('SOIBENCH_MGIT_JSONL'),
+        '/root/user-data/wyp/VLMTrack/SOIBench/data/test/mgit',
+        '/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit',
+    ]) or ''
+    tnl2k = _pick_existing([
+        os.environ.get('SOIBENCH_TNL2K_JSONL'),
+        '/root/user-data/wyp/VLMTrack/SOIBench/data/test/tnl2k',
+        '/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k',
+    ]) or ''
+    return lasot, mgit, tnl2k
+
+
 # 默认模型名映射表（存储名 -> 显示名）
 DEFAULT_MODEL_NAME_MAP = {
     # Qwen3VL 系列
@@ -285,6 +311,8 @@ def plot_success_curves(results, output_dir, ds_name, name_map=None):
 
 
 def main():
+    default_lasot_gt, default_mgit_gt, default_tnl2k_gt = _resolve_default_gt_roots()
+
     parser = argparse.ArgumentParser(description="SOIBench Grounding 评测脚本")
     
     parser.add_argument("--pred_root", type=str, default="./results",
@@ -298,13 +326,13 @@ def main():
     
     # GT 根目录
     parser.add_argument("--lasot_gt_root", type=str, 
-                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/lasot",
+                        default=default_lasot_gt,
                         help="LaSOT GT JSONL 根目录")
     parser.add_argument("--mgit_gt_root", type=str, 
-                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/mgit",
+                        default=default_mgit_gt,
                         help="MGIT GT JSONL 根目录")
     parser.add_argument("--tnl2k_gt_root", type=str, 
-                        default="/home/member/data2/wyp/SUTrack/SOIBench/data/test/tnl2k",
+                        default=default_tnl2k_gt,
                         help="TNL2K GT JSONL 根目录")
     
     # 人类基线
