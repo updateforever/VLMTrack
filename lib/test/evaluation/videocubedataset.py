@@ -67,7 +67,7 @@ class VideoCubeDataset(BaseDataset):
 
         ground_truth_rect = load_text(str(anno_path), delimiter=',', dtype=np.float64)
 
-        frames_path = r'{}/{}/{}/{}/{}_{}'.format(self.base_path, 'data', self.split, sequence_name, 'frame', sequence_name)
+        frames_path = r'{}/{}/{}/{}/frame_{}'.format(self.base_path, 'data', self.split, sequence_name, sequence_name)
         
         frame_list = [frame for frame in os.listdir(frames_path) if frame.endswith(".jpg")]
         frame_list.sort(key=lambda f: int(f[:-4]))

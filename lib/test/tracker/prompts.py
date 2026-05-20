@@ -508,257 +508,66 @@ class InitialCognitionMosaicPrompt(PromptTemplate):
         )
 
 
-# ==================== 认知跟踪Prompt v2（启发式推理版）====================
-
-class CognitiveMosaicPromptV2(PromptTemplate):
+class CognitiveBenchTrackingPrompt(PromptTemplate):
     """
-    认知跟踪 Mosaic v2：强调启发式推理，要求模型主动解释身份匹配证据。
-
-    核心改进（对比 v1）：
-    - 认知链不再是"按步骤描述"，而是要求"自由推理"
-    - 要求模型主动分析当前帧与历史的差异（视角变化、缩放、遮挡等）
-    - 通过反例引导（BAD examples）防止模型写套路化描述
-    - 强调"为什么认为这还是同一个目标"
+    CognitiveBench v1 prompt: binary target status + bbox + target text update.
     """
     def __init__(self):
         super().__init__(
-            name="cognitive_mosaic_tracking_v2",
-            description="Tracking with historical frame mosaic + heuristic reasoning guidance"
+            name="cognitivebench_tracking",
+            description="CognitiveBench binary target status and bbox tracking"
         )
 
     def build(self,
-              memory_cognition: str = "",
+              context_mode: str = "mosaic",
               language_description: str = "",
-              num_history_frames: int = 2) -> str:
-        return (
-            "# === TASK: Cognitive Visual Tracking ===\n\n"
-            "You are performing cognitive visual tracking - maintaining continuous awareness of a target object across video frames.\n\n"
-
-            "## Input Description\n\n"
-            "**Image 1 (Historical Reference Mosaic)** contains:\n"
-            "- **Initial Template**: Frame #0 with GREEN bounding box (ground truth annotation)\n"
-            "- **Historical Trajectory Reference**: Several historical frames with RED bounding boxes (predicted results, may contain errors)\n\n"
-            "**Image 2 (Current Frame)**: Where you need to locate the target\n\n"
-            f"**Previous Cognition Chain** (your last reasoning, use it as memory):\n{memory_cognition}\n\n"
-            f"**Initial Target Description** (mandatory reference):\n{language_description}\n\n"
-            "---\n\n"
-
-            "# === OUTPUT REQUIREMENTS ===\n\n"
-            "## 1. Current Frame Prediction\n\n"
-            "### Target Status (choose ONE option):\n"
-            "A. normal - Target clearly visible\n"
-            "B. partially_occluded - Target partially blocked but identifiable\n"
-            "C. fully_occluded - Target completely blocked but likely still in scene\n"
-            "D. out_of_view - Target moved outside frame boundaries\n"
-            "E. disappeared - Target vanished from scene\n"
-            "F. reappeared - Target returned after being absent\n\n"
-
-            "### Bounding Box:\n"
-            "- If visible or location inferable (A/B/C/F): Provide [x1, y1, x2, y2] in 0-1000 scale\n"
-            "- If completely unlocatable (D/E): Output [0, 0, 0, 0]\n\n"
-
-            "### Environment Status (select ALL applicable options):\n"
-            "A. normal\n"
-            "B. low_light\n"
-            "C. high_light\n"
-            "D. motion_blur\n"
-            "E. scene_change\n"
-            "F. viewpoint_change\n"
-            "G. scale_change\n"
-            "H. crowded\n"
-            "I. background_clutter\n\n"
-
-            "## 2. Cognition Chain (your free-form tracking reasoning)\n\n"
-            "Write 2-4 sentences of **free-form reasoning** - think like a human expert tracker.\n"
-            "Your chain serves two purposes: (1) justify your current prediction, (2) become memory for the next frame.\n\n"
-
-            "When writing, actively reason about these questions (weave answers into natural narrative, do NOT list them):\n"
-            "- Is what I see in the current frame really the same target? What visual evidence confirms or challenges this?\n"
-            "- Did anything change from the previous chain? (camera zoom, viewpoint shift, occlusion, re-appearance)\n"
-            "  → If the target looks different now (e.g. full-body → head close-up), explicitly explain WHY it is still the same target.\n"
-            "- Where is the target now, and where is it likely heading? What risk could cause tracking failure?\n\n"
-
-            "**GOOD example** (scene: camera zooms from full-body to head close-up of a person):\n"
-            "\"The camera has cut to a close-up, now showing only the head and shoulders. "
-            "The short black hair and red jacket collar are consistent with the full-body view in Frame #0, "
-            "confirming this is the same person despite the drastic viewpoint change. "
-            "The target appears to be turning slightly left, and may exit frame from the left edge soon.\"\n\n"
-
-            "**BAD examples** (mechanical, no reasoning - avoid these):\n"
-            "- \"The target is a person. It is visible. It is in the center of the frame.\"\n"
-            "- \"Target status is normal. The target is moving right.\"\n\n"
-
-            "## 3. Confidence Score\n"
-            "Your confidence in the prediction (0.0-1.0, 0.1 granularity)\n\n"
-            "---\n\n"
-
-            "# === OUTPUT FORMAT ===\n\n"
-            "Respond with ONLY this JSON (no markdown fence):\n"
-            "{\n"
-            '  "target_status": "A",\n'
-            '  "environment_status": ["A"],\n'
-            '  "bbox": [x1, y1, x2, y2],\n'
-            '  "cognition_chain": "Your free-form reasoning here...",\n'
-            '  "confidence": 0.9\n'
-            "}\n"
-        )
-
-
-class CognitiveMosaicRefPromptV2(PromptTemplate):
-    """
-    认知跟踪 Mosaic + Ref v2：在 v2 启发式推理基础上，额外提供初始 GT 坐标锚点。
-    """
-    def __init__(self):
-        super().__init__(
-            name="cognitive_mosaic_ref_tracking_v2",
-            description="Tracking with historical frame mosaic + explicit init bbox reference + heuristic reasoning"
-        )
-
-    def build(self,
-              memory_cognition: str = "",
-              language_description: str = "",
-              num_history_frames: int = 2,
+              target_text_history=None,
+              output_reasoning: bool = True,
+              num_history_frames: int = 0,
+              use_init_bbox_ref: bool = False,
               init_bbox_1000=None) -> str:
+        if context_mode == "pair":
+            context_desc = (
+                "Image 1: initial reference; GREEN box marks the target. "
+                "Image 2: current frame."
+            )
+        else:
+            context_desc = (
+                "Image 1: reference mosaic. GREEN box marks the initial target; RED boxes are past predictions. "
+                "Image 2: current frame."
+            )
+
+        bbox_ref_text = ""
+        if use_init_bbox_ref and init_bbox_1000 is not None:
+            bbox_ref_text = (
+                f"Initial anchor bbox [0,999]: {init_bbox_1000}. Use it for identity only.\n"
+            )
+
+        history_text = ""
+        if target_text_history:
+            history_text = "; ".join(str(t) for t in target_text_history if str(t).strip())
+
+        reasoning_line = '  "reasoning": "brief identity evidence",\n' if output_reasoning else ""
         return (
-            "# === TASK: Cognitive Visual Tracking ===\n\n"
-            "You are performing cognitive visual tracking - maintaining continuous awareness of a target object across video frames.\n\n"
-
-            "## Input Description\n\n"
-            "**Image 1 (Historical Reference Mosaic)** contains:\n"
-            "- **Initial Template (ANCHOR)**: Frame #0 with GREEN bounding box (ground truth annotation)\n"
-            "- **Historical Trajectory Reference**: Several historical frames with RED bounding boxes (predicted results, may contain errors)\n\n"
-            f"**Explicit Initial Anchor BBox** (Image-1 coordinates, normalized [0,999]): {init_bbox_1000}\n"
-            "Treat this bbox as the authoritative identity anchor.\n\n"
-            "**Image 2 (Current Frame)**: Where you need to locate the target\n\n"
-            f"**Previous Cognition Chain** (your last reasoning, use it as memory):\n{memory_cognition}\n\n"
-            f"**Initial Target Description** (mandatory reference):\n{language_description}\n\n"
-
-            "## Priority Rules\n"
-            "1. Frame #0 GREEN box + explicit anchor bbox define the target identity.\n"
-            "2. RED boxes are motion hints only; they may be wrong.\n"
-            "3. If anchor appearance conflicts with RED trajectory, trust the anchor.\n\n"
-            "---\n\n"
-
-            "# === OUTPUT REQUIREMENTS ===\n\n"
-            "## 1. Current Frame Prediction\n\n"
-            "### Target Status (choose ONE option):\n"
-            "A. normal - Target clearly visible\n"
-            "B. partially_occluded - Target partially blocked but identifiable\n"
-            "C. fully_occluded - Target completely blocked but likely still in scene\n"
-            "D. out_of_view - Target moved outside frame boundaries\n"
-            "E. disappeared - Target vanished from scene\n"
-            "F. reappeared - Target returned after being absent\n\n"
-
-            "### Bounding Box:\n"
-            "- If visible or location inferable (A/B/C/F): Provide [x1, y1, x2, y2] in 0-1000 scale\n"
-            "- If completely unlocatable (D/E): Output [0, 0, 0, 0]\n\n"
-
-            "### Environment Status (select ALL applicable options):\n"
-            "A. normal\n"
-            "B. low_light\n"
-            "C. high_light\n"
-            "D. motion_blur\n"
-            "E. scene_change\n"
-            "F. viewpoint_change\n"
-            "G. scale_change\n"
-            "H. crowded\n"
-            "I. background_clutter\n\n"
-
-            "## 2. Cognition Chain (your free-form tracking reasoning)\n\n"
-            "Write 2-4 sentences of **free-form reasoning** - think like a human expert tracker.\n"
-            "Your chain serves two purposes: (1) justify your current prediction, (2) become memory for the next frame.\n\n"
-
-            "When writing, actively reason about these questions (weave answers into natural narrative, do NOT list them):\n"
-            "- Is what I see in the current frame really the same target? What visual evidence confirms or challenges this?\n"
-            "- Did anything change from the previous chain? (camera zoom, viewpoint shift, occlusion, re-appearance)\n"
-            "  → If the target looks different now (e.g. full-body → head close-up), explicitly explain WHY it is still the same target.\n"
-            "- Where is the target now, and where is it likely heading? What risk could cause tracking failure?\n\n"
-
-            "**GOOD example** (scene: camera zooms from full-body to head close-up of a person):\n"
-            "\"The camera has cut to a close-up, now showing only the head and shoulders. "
-            "The short black hair and red jacket collar are consistent with the full-body view in Frame #0, "
-            "confirming this is the same person despite the drastic viewpoint change. "
-            "The target appears to be turning slightly left, and may exit frame from the left edge soon.\"\n\n"
-
-            "**BAD examples** (mechanical, no reasoning - avoid these):\n"
-            "- \"The target is a person. It is visible. It is in the center of the frame.\"\n"
-            "- \"Target status is normal. The target is moving right.\"\n\n"
-
-            "## 3. Confidence Score\n"
-            "Your confidence in the prediction (0.0-1.0, 0.1 granularity)\n\n"
-            "---\n\n"
-
-            "# === OUTPUT FORMAT ===\n\n"
-            "Respond with ONLY this JSON (no markdown fence):\n"
+            "Task: continuously track one target instance.\n"
+            f"{context_desc}\n"
+            "GREEN/RED boxes are artificial overlays, not scene objects.\n"
+            f"Initial target text: {language_description if language_description else '(none)'}\n"
+            f"History target text: {history_text if history_text else '(none)'}\n"
+            f"{bbox_ref_text}"
+            "Rules: GREEN box defines identity; RED boxes and history text are hints and may be wrong. "
+            "Search Image 2 only. Reject distractors. "
+            "present means the same target is visible and localizable; otherwise absent. "
+            "If present, bbox=[x1,y1,x2,y2] normalized to [0,1000] in Image 2; if absent, bbox=[null,null,null,null]. "
+            "Update target_text with a short current description useful for later tracking.\n"
+            "Output only JSON:\n"
             "{\n"
-            '  "target_status": "A",\n'
-            '  "environment_status": ["A"],\n'
+            '  "target_status": "present",\n'
             '  "bbox": [x1, y1, x2, y2],\n'
-            '  "cognition_chain": "Your free-form reasoning here...",\n'
-            '  "confidence": 0.9\n'
+            f"{reasoning_line}"
+            '  "target_text": "short updated target description"\n'
             "}\n"
         )
-
-class InitialCognitionMosaicPromptV2(PromptTemplate):
-    """
-    Mosaic 初始化认知 V2：与 V1 结构相同，但强调推理预判而非特征罗列。
-    引导模型像人类一样"先想清楚再跟踪"。
-    """
-    def __init__(self):
-        super().__init__(
-            name="initial_cognition_mosaic_v2",
-            description="Initial cognition chain with reasoning emphasis (V2)"
-        )
-
-    def build(self, target_description: str = "") -> str:
-        return (
-            "# === TASK: Initialize Cognitive Tracking Chain ===\n\n"
-            "You are starting a cognitive visual tracking task. Generate an initial **cognition chain** — "
-            "a tracking-oriented narrative that will be passed to future frames as your memory.\n\n"
-
-            "---\n\n"
-
-            "# === INPUT ===\n\n"
-            "**Image**: One frame with a GREEN bounding box.\n"
-            "- The GREEN box is an **auxiliary annotation** marking the target region.\n"
-            "- Do NOT describe the green box itself. Focus on the **object inside**.\n\n"
-            f"**Target Text Description** (MUST consider, not optional):\n"
-            f"{target_description if target_description else '(No text description provided)'}\n"
-            "- This is **mandatory input** for understanding target identity.\n"
-            "- When the target is small, blurry, or ambiguous, rely heavily on this text.\n\n"
-
-            "---\n\n"
-
-            "# === WHAT TO WRITE ===\n\n"
-            "Write a **2-4 sentence narrative** as if you are a human tracker preparing to follow this target. "
-            "Think about:\n\n"
-            "- **Who/what am I tracking?** State clearly, combining text description + visual evidence.\n"
-            "- **How will I recognize it later?** What makes it unique? What could I confuse it with?\n"
-            "- **What is it doing right now?** Position, motion, action.\n"
-            "- **What should I watch out for?** Predict what might happen and what could go wrong.\n\n"
-
-            "Example — tracking an airplane (text description: \"airplane\"):\n\n"
-            "\"The target is a white commercial airplane with a blue tail stripe, currently descending toward "
-            "the runway at the far end. A similar white airplane is parked on the tarmac to the right — "
-            "I need to track the one in motion, not the stationary one. "
-            "The target will likely touch down soon and begin taxiing, at which point the two planes "
-            "could be closer together and harder to distinguish.\"\n\n"
-
-            "Example — tracking a person (text description: \"person\"):\n\n"
-            "\"The target is a woman in a red jacket and jeans, standing near the entrance of a café. "
-            "Several other pedestrians are nearby, but she is the only one wearing red. "
-            "She appears to be about to walk inside, which would cause a full occlusion. "
-            "If the camera follows, I should expect a scene change from outdoor to indoor.\"\n\n"
-
-            "---\n\n"
-
-            "# === OUTPUT FORMAT ===\n\n"
-            "Respond with ONLY this JSON (no markdown fence, no extra text):\n"
-            "{\n"
-            '  "init_cognition": "Your 2-4 sentence cognition chain here."\n'
-            "}\n"
-        )
-
 
 class PromptManager:
     """
@@ -772,13 +581,11 @@ class PromptManager:
         "cognitive": CognitiveTrackingPrompt(),  # 认知跟踪（统一框架）
         "cognitive_mosaic": CognitiveMosaicPrompt(),  # 认知跟踪（Mosaic 版本）
         "cognitive_mosaic_ref": CognitiveMosaicRefPrompt(),  # 认知跟踪（Mosaic + 坐标锚点）
-        "cognitive_mosaic_v2": CognitiveMosaicPromptV2(),  # v2：自由启发式推理
-        "cognitive_mosaic_ref_v2": CognitiveMosaicRefPromptV2(),  # v2：自由推理 + 坐标锚点
+        "cognitivebench": CognitiveBenchTrackingPrompt(),
 
         # 辅助prompt
         "init_memory": InitialMemoryPrompt(),
         "init_cognition_mosaic": InitialCognitionMosaicPrompt(),       # v1
-        "init_cognition_mosaic_v2": InitialCognitionMosaicPromptV2(),  # v2：推理预判
         "init_story_mosaic": InitialCognitionMosaicPrompt(),           # 兼容旧名称
     }
 
@@ -794,11 +601,8 @@ class PromptManager:
                 - "cognitive": 认知跟踪
                 - "cognitive_mosaic": 认知跟踪（Mosaic 版本）v1
                 - "cognitive_mosaic_ref": 认知跟踪（Mosaic + 坐标锚点）v1
-                - "cognitive_mosaic_v2": 认知跟踪（Mosaic 版本）v2，自由启发式推理
-                - "cognitive_mosaic_ref_v2": 认知跟踪（Mosaic + 坐标锚点）v2，自由启发式推理
                 - "init_memory": 初始记忆生成
                 - "init_cognition_mosaic": Mosaic专用初始认知结果 v1
-                - "init_cognition_mosaic_v2": Mosaic专用初始认知结果 v2，推理预判
                 - "init_story_mosaic": 兼容旧名称，等价于 init_cognition_mosaic
 
         Returns:

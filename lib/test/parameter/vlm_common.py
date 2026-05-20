@@ -15,11 +15,11 @@ import difflib
 import yaml
 
 # 固定本机模型路径（跨服务器切换时手动修改这里）
-_MLLM_ROOT = '/root/user-data/MODEL_WEIGHTS_PUBLIC/MLLM_weights'
+_MLLM_ROOT = '/data/MODEL_WEIGHTS_PUBLIC/MLLM_weights'
 
 # Qwen2.5-VL
-_QWEN25_3B_PATH = os.path.join(_MLLM_ROOT, 'Qwen2_5-VL-3B-Instruct')
-_QWEN25_7B_PATH = os.path.join(_MLLM_ROOT, 'Qwen2_5-VL-7B-Instruct')
+_QWEN25_3B_PATH = os.path.join(_MLLM_ROOT, 'Qwen2.5-VL-3B-Instruct')
+_QWEN25_7B_PATH = os.path.join(_MLLM_ROOT, 'Qwen2.5-VL-7B-Instruct')
 _QWEN25_32B_PATH = os.path.join(_MLLM_ROOT, 'Qwen2_5-VL-32B-Instruct')
 
 # Qwen3-VL

@@ -9,7 +9,7 @@ def local_env_settings():
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
     # 固定数据根目录（本机）
-    data_root = '/root/user-data/PUBLIC_DATASETS'
+    data_root = '/data/DATASETS_PUBLIC'
 
     # Set your local paths here.
     settings.davis_dir = ''
@@ -43,6 +43,7 @@ def local_env_settings():
     settings.videocube_path = f'{data_root}/MGIT'
     settings.tnl2k_path = f'{data_root}/TNL2K/TNL2K_test_subset'
     settings.soi_bench_path = f'{data_root}/SOIBench/test_anno'
+    settings.cognitivebench_path = f'{data_root}/CognitiveBench'
 
     # 固定关键帧索引路径
     settings.keyframe_root = f'{data_root}/SOIBench/KeyFrame/scene_changes_clip/top_10'

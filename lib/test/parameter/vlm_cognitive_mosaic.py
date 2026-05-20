@@ -2,7 +2,7 @@
 Parameters for vlm_cognitive_mosaic
 
 tracker_param 语法:
-    <deploy_and_model>[_bN][_sM][_ref][_v2]
+    <deploy_and_model>[_bN][_sM][_ref]
 
 deploy_and_model:
     - api_default / api_xxx
@@ -12,7 +12,6 @@ deploy_and_model:
     _bN  : history_buffer_size = N（默认 3）
     _sM  : sample_interval = M（默认 30）
     _ref : 启用 init_bbox 坐标锚点（使用 cognitive_mosaic_ref prompt）
-    _v2  : 使用 v2 prompt（自由启发式推理），可与 _ref 组合
 """
 from lib.test.utils import TrackerParams
 from lib.test.evaluation.environment import env_settings
@@ -38,7 +37,6 @@ def parameters(tracker_param: str = "api_default"):
     buffer_size = getattr(params, 'history_buffer_size', 3)
     sample_interval = getattr(params, 'sample_interval', 30)
     use_init_bbox_ref = getattr(params, 'use_init_bbox_ref', False)
-    use_v2_prompt = False
 
     while core_tokens:
         token = core_tokens[-1]
@@ -54,10 +52,6 @@ def parameters(tracker_param: str = "api_default"):
             use_init_bbox_ref = True
             core_tokens.pop()
             continue
-        if token == 'v2':
-            use_v2_prompt = True
-            core_tokens.pop()
-            continue
         break
 
     deploy_and_model = '_'.join(core_tokens) if core_tokens else 'api_default'
@@ -70,14 +64,11 @@ def parameters(tracker_param: str = "api_default"):
     params.sample_interval = sample_interval
     params.use_init_bbox_ref = use_init_bbox_ref
 
-    # 5) 保底兼容字段：根据 ref / v2 后缀选择 prompt
-    if use_v2_prompt:
-        default_prompt = 'cognitive_mosaic_ref_v2' if use_init_bbox_ref else 'cognitive_mosaic_v2'
-    else:
-        default_prompt = 'cognitive_mosaic_ref' if use_init_bbox_ref else 'cognitive_mosaic'
+    # 5) 保底兼容字段：根据 ref 后缀选择 prompt
+    default_prompt = 'cognitive_mosaic_ref' if use_init_bbox_ref else 'cognitive_mosaic'
     params.track_prompt = getattr(params, 'track_prompt', default_prompt)
     # 后缀显式指定时强制覆盖 YAML 中的值
-    if use_v2_prompt or use_init_bbox_ref:
+    if use_init_bbox_ref:
         params.track_prompt = default_prompt
     params.init_prompt = getattr(params, 'init_prompt', 'init_story_mosaic')
     params.debug = getattr(params, 'debug', 0)

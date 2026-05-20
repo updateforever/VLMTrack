@@ -109,6 +109,8 @@ class VLMEngine:
             prompt=prompt,
             model_name=self.api_model,
             client=self.client,
+            temperature=getattr(self.params, 'temperature', 0.1),
+            max_tokens=getattr(self.params, 'max_new_tokens', 512),
         )
     
     def _infer_local(self, images: List[np.ndarray], prompt: str) -> str:

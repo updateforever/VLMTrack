@@ -83,6 +83,9 @@ class Tracker:
 
         params.debug = debug_
         params.debug_frames = getattr(self, 'debug_frames', None)
+        params.results_dir = self.results_dir
+        params.tracker_name = self.name
+        params.tracker_param = self.parameter_name
 
         # Get init information
         init_info = seq.init_info()
@@ -114,7 +117,7 @@ class Tracker:
             output['all_scores'] = []
 
         # VLM 跟踪器额外保存元数据
-        vlm_trackers = ['vlm_cognitive', 'vlm_cognitive_mosaic', 'vlm_visual', 'vlm_hybrid']
+        vlm_trackers = ['vlm_tracker', 'vlm_cognitive', 'vlm_cognitive_mosaic', 'vlm_visual', 'vlm_hybrid']
         save_vlm_metadata = self.name in vlm_trackers
         if save_vlm_metadata:
             output['vlm_metadata'] = []
@@ -123,7 +126,9 @@ class Tracker:
             defaults = {} if defaults is None else defaults
             for key in output.keys():
                 val = tracker_out.get(key, defaults.get(key, None))
-                if key in tracker_out or val is not None:
+                if key == 'vlm_metadata' and save_vlm_metadata:
+                    output[key].append(val)
+                elif key in tracker_out or val is not None:
                     output[key].append(val)
 
         # Initialize
@@ -138,6 +143,8 @@ class Tracker:
         prev_output = OrderedDict(out)
         init_default = {'target_bbox': init_info.get('init_bbox'),
                         'time': time.time() - start_time}
+        if save_vlm_metadata:
+            init_default['vlm_metadata'] = None
         if tracker.params.save_all_boxes:
             init_default['all_boxes'] = out['all_boxes']
             init_default['all_scores'] = out['all_scores']
@@ -149,24 +156,33 @@ class Tracker:
         use_keyframe = getattr(tracker.params, 'use_keyframe', False)
         
         if use_keyframe:
-            # 从params获取索引文件根目录
-            keyframe_root = getattr(tracker.params, 'keyframe_root', None)
-            
-            if keyframe_root:
-                # 根据数据集名和序列名加载关键帧索引
-                keyframe_indices = load_keyframe_indices(
-                    dataset_name=self.dataset_name,
-                    seq_name=seq.name,
-                    keyframe_root=keyframe_root,
-                )
-                
+            if hasattr(seq, 'keyframe_indices') and seq.keyframe_indices is not None:
+                keyframe_indices = set(seq.keyframe_indices)
                 if keyframe_indices:
                     print(f"[Tracker] Loaded {len(keyframe_indices)} keyframes for {seq.name} "
-                          f"({len(keyframe_indices)/len(seq.frames)*100:.1f}% of total frames)")
+                          f"from dataset metadata ({len(keyframe_indices)/len(seq.frames)*100:.1f}% of total frames)")
                 else:
-                    print(f"[Tracker] Warning: No keyframe indices found for {seq.name}, "
-                          f"falling back to dense tracking")
+                    print(f"[Tracker] Warning: Empty keyframe indices for {seq.name}, falling back to dense tracking")
                     use_keyframe = False
+            else:
+                # 从params获取索引文件根目录
+                keyframe_root = getattr(tracker.params, 'keyframe_root', None)
+
+                if keyframe_root:
+                    # 根据数据集名和序列名加载关键帧索引
+                    keyframe_indices = load_keyframe_indices(
+                        dataset_name=self.dataset_name,
+                        seq_name=seq.name,
+                        keyframe_root=keyframe_root,
+                    )
+
+                    if keyframe_indices:
+                        print(f"[Tracker] Loaded {len(keyframe_indices)} keyframes for {seq.name} "
+                              f"({len(keyframe_indices)/len(seq.frames)*100:.1f}% of total frames)")
+                    else:
+                        print(f"[Tracker] Warning: No keyframe indices found for {seq.name}, "
+                              f"falling back to dense tracking")
+                        use_keyframe = False
         # ========================================================
 
         frame_paths = seq.frames[1:]
@@ -213,6 +229,11 @@ class Tracker:
             if out is None:
                 # 非关键帧: 填充NaN bbox
                 out = {'target_bbox': [float('nan')] * 4}
+                if save_vlm_metadata:
+                    out['vlm_metadata'] = {
+                        'skipped': True,
+                        'skip_reason': 'non_keyframe',
+                    }
             
             prev_output = OrderedDict(out)
             _store_outputs(out, {'time': time.time() - start_time})
@@ -358,5 +379,3 @@ class Tracker:
             return decode_img(image_file[0], image_file[1])
         else:
             raise ValueError("type of image_file should be str or list")
-
-

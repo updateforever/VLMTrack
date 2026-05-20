@@ -51,6 +51,82 @@ def _save_tracker_output(seq: Sequence, tracker: Tracker, output: dict):
                     data_dict[k] = [v, ]
         return data_dict
 
+    def _to_builtin(val):
+        if isinstance(val, np.ndarray):
+            return val.tolist()
+        if isinstance(val, np.generic):
+            return val.item()
+        if isinstance(val, (list, tuple)):
+            return [_to_builtin(v) for v in val]
+        if isinstance(val, dict):
+            return {k: _to_builtin(v) for k, v in val.items()}
+        return val
+
+    def _status_name(value):
+        if value is None:
+            return None
+        try:
+            return "present" if int(value) == 1 else "absent"
+        except Exception:
+            return str(value)
+
+    def _save_cognitivebench_jsonl():
+        if seq.dataset != 'cognitivebench':
+            return
+
+        jsonl_file = '{}_frames.jsonl'.format(base_results_path)
+        target_bbox = output.get('target_bbox', [])
+        times = output.get('time', [])
+        metadata = output.get('vlm_metadata', [])
+        keyframes = getattr(seq, 'keyframe_indices', None)
+        target_status = getattr(seq, 'target_status', None)
+        target_visible = getattr(seq, 'target_visible', None)
+        source_dataset = getattr(seq, 'source_dataset', None)
+        source_split = getattr(seq, 'source_split', None)
+        source_sequence = getattr(seq, 'source_sequence', seq.name)
+
+        with open(jsonl_file, 'w', encoding='utf-8') as f:
+            for frame_id, bbox in enumerate(target_bbox):
+                meta = metadata[frame_id] if frame_id < len(metadata) else None
+                gt_bbox = None
+                if seq.ground_truth_rect is not None and frame_id < len(seq.ground_truth_rect):
+                    gt_bbox = _to_builtin(seq.ground_truth_rect[frame_id])
+
+                status_value = None
+                if target_status is not None and frame_id < len(target_status):
+                    status_value = target_status[frame_id]
+                elif target_visible is not None and frame_id < len(target_visible):
+                    status_value = 1 if target_visible[frame_id] else 0
+
+                record = {
+                    'frame_id': frame_id,
+                    'sequence': seq.name,
+                    'dataset': seq.dataset,
+                    'source_dataset': source_dataset,
+                    'source_split': source_split,
+                    'source_sequence': source_sequence,
+                    'image_path': seq.frames[frame_id] if frame_id < len(seq.frames) else None,
+                    'is_keyframe': bool(frame_id in keyframes) if keyframes is not None else None,
+                    'gt_bbox': gt_bbox,
+                    'gt_target_status': _status_name(status_value),
+                    'pred_bbox': _to_builtin(bbox),
+                    'time': _to_builtin(times[frame_id]) if frame_id < len(times) else None,
+                }
+
+                if meta:
+                    record['vlm_output'] = _to_builtin(meta)
+                    if isinstance(meta, dict) and meta.get('skipped'):
+                        record['skipped'] = True
+                        record['skip_reason'] = meta.get('skip_reason')
+
+                f.write(json.dumps(record, ensure_ascii=False) + '\n')
+
+        print(f"Saved CognitiveBench frame JSONL to {jsonl_file}")
+
+    if seq.dataset == 'cognitivebench':
+        _save_cognitivebench_jsonl()
+        return
+
     # ========== 保存 VLM 元数据（新增）==========
     if 'vlm_metadata' in output and output['vlm_metadata']:
         metadata_file = '{}_full.json'.format(base_results_path)
@@ -161,6 +237,9 @@ def run_sequence(seq: Sequence, tracker: Tracker, debug=False, num_gpu=8, run_ta
         if seq.object_ids is None:
             # if seq.dataset in ['trackingnet', 'got10k', 'lasot', 'lasot_extension_subset', 'otb', 'uav', 'nfs', 'tnl2k']:
             base_results_path = os.path.join(tracker.results_dir, seq.dataset, seq.name)
+            if seq.dataset == 'cognitivebench':
+                jsonl_file = '{}_frames.jsonl'.format(base_results_path)
+                return _cognitivebench_jsonl_complete(jsonl_file, len(seq.frames))
             bbox_file = '{}.txt'.format(base_results_path)
             # else:
             #     bbox_file = '{}/{}.txt'.format(tracker.results_dir, seq.name)
@@ -169,6 +248,37 @@ def run_sequence(seq: Sequence, tracker: Tracker, debug=False, num_gpu=8, run_ta
             bbox_files = ['{}/{}_{}.txt'.format(tracker.results_dir, seq.name, obj_id) for obj_id in seq.object_ids]
             missing = [not os.path.isfile(f) for f in bbox_files]
             return sum(missing) == 0
+
+    def _cognitivebench_jsonl_complete(jsonl_file, expected_frames):
+        if not os.path.isfile(jsonl_file):
+            return False
+
+        line_count = 0
+        last_line = None
+        try:
+            with open(jsonl_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        line_count += 1
+                        last_line = line
+
+            if line_count != expected_frames:
+                print(f"[CognitiveBench] Incomplete result {jsonl_file}: "
+                      f"{line_count}/{expected_frames} frames, rerunning")
+                return False
+
+            if last_line is None:
+                return False
+            last_record = json.loads(last_line)
+            if int(last_record.get('frame_id', -1)) != expected_frames - 1:
+                print(f"[CognitiveBench] Invalid last frame in {jsonl_file}: "
+                      f"{last_record.get('frame_id')} != {expected_frames - 1}, rerunning")
+                return False
+
+            return True
+        except Exception as e:
+            print(f"[CognitiveBench] Invalid result {jsonl_file}: {e}, rerunning")
+            return False
 
     if _results_exist() and not debug:
         print('FPS: {}'.format(-1))

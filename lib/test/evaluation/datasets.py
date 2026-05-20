@@ -24,6 +24,7 @@ dataset_dict = dict(
     tnl2k=DatasetInfo(module=pt % "tnl2k", class_name="TNL2kDataset", kwargs=dict()),
     lasot_lang=DatasetInfo(module=pt % "lasotlang", class_name="LaSOTLangDataset", kwargs=dict()),
     soibench = DatasetInfo(module=pt % "soibench", class_name="SOIBenchDataset", kwargs=dict()), #
+    cognitivebench=DatasetInfo(module=pt % "cognitivebench", class_name="CognitiveBenchDataset", kwargs=dict()),
 
     # add for MGIT
     videocube_test=DatasetInfo(module=pt % "videocube", class_name="VideoCubeDataset", kwargs=dict(split='test')),
